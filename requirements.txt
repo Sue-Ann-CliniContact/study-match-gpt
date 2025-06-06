@@ -1,0 +1,7 @@
+openai
+fastapi
+uvicorn
+python-dotenv
+requests
+xmltodict
+httpx
