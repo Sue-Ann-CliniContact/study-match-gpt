@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def run_chat(user_input, conversation_history=[]):
     system_message = {
@@ -19,11 +19,11 @@ def run_chat(user_input, conversation_history=[]):
 
     messages = [system_message] + conversation_history + [{"role": "user", "content": user_input}]
 
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=messages,
         temperature=0.7
     )
 
-    assistant_reply = response["choices"][0]["message"]["content"]
+    assistant_reply = response.choices[0].message.content
     return assistant_reply
