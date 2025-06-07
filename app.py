@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from gpt_logic import handle_message
+from gpt_logic import run_chat
 import os
 
 load_dotenv()
@@ -21,5 +21,5 @@ async def chat(request: Request):
     data = await request.json()
     message = data.get("message")
     history = data.get("history", [])
-    response = await handle_message(message, history)
+    response = run_chat(user_input, chat_history)
     return {"reply": response}
