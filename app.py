@@ -19,7 +19,7 @@ app.add_middleware(
 @app.post("/chat")
 async def chat(request: Request):
     data = await request.json()
-    message = data.get("message")
-    history = data.get("history", [])
+    user_input = data.get("message", "")
+    chat_history = data.get("chat_history", [])
     response = run_chat(user_input, chat_history)
-    return {"reply": response}
+    return {"response": response}
