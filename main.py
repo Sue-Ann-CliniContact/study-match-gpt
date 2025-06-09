@@ -56,7 +56,7 @@ Ask one question at a time in a friendly tone. Use previous answers to skip ahea
 
 Say nothing else in that message. Do not match studies or explain yet."""
 
-chat_histories = {{}}
+chat_histories = {}
 
 @app.post("/chat")
 async def chat_handler(request: Request):
