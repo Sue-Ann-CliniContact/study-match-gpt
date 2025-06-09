@@ -79,13 +79,13 @@ async def chat_handler(request: Request):
 
     chat_histories[session_id].append({"role": "user", "content": user_input})
 
-    response = openai.chat.completions.create(
+    response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=chat_histories[session_id],
         temperature=0.5
     )
 
-    gpt_message = response.choices[0].message.content
+    gpt_message = response.choices[0].message["content"]
     chat_histories[session_id].append({"role": "assistant", "content": gpt_message})
 
     match = re.search(r'{[\s\S]*}', gpt_message)
@@ -109,12 +109,12 @@ async def chat_handler(request: Request):
             # Format and return
             match_summary = format_matches_for_gpt(matches)
             chat_histories[session_id].append({"role": "user", "content": match_summary})
-            followup_response = openai.chat.completions.create(
+            followup_response = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=chat_histories[session_id],
                 temperature=0.5
             )
-            final_reply = followup_response.choices[0].message.content
+            final_reply = followup_response.choices[0].message["content"]
             return {"reply": final_reply}
         except Exception as e:
             return {"reply": "We encountered an error processing your info.", "error": str(e)}
