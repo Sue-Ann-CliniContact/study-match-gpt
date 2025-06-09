@@ -44,7 +44,7 @@ def match_studies(participant_data, all_studies):
                     found = True
                     break
             for zipc in zipcodes:
-                if zipc in location:
+                if zipc and zipc in location:
                     found = True
                     break
             if not found:

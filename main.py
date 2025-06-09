@@ -106,16 +106,15 @@ async def chat_handler(request: Request):
                 all_studies = json.load(f)
             print("Loaded studies:", len(all_studies))
 
-            try:
-                matches = match_studies(participant_data, all_studies)
-                print("Found matches:", matches)
-            except Exception as e:
-                print("Error during study matching:", str(e))
-                matches = []
+            matches = match_studies(participant_data, all_studies)
+            print("Found matches:", matches)
 
             # Format and return
             match_summary = format_matches_for_gpt(matches)
             print("Match summary to GPT:", match_summary)
+
+            if not matches:
+                return {"reply": match_summary}
 
             chat_histories[session_id].append({"role": "user", "content": match_summary})
             followup_response = openai.ChatCompletion.create(
