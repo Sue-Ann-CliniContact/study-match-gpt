@@ -52,4 +52,4 @@ def match_studies(participant_data, all_studies):
 
         matches.append(study)
 
-    return match
+    return matches
