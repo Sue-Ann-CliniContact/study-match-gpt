@@ -1,4 +1,3 @@
-
 import os
 import requests
 import json
@@ -14,15 +13,19 @@ def push_to_monday(participant_data):
         "Content-Type": "application/json"
     }
 
+    # Fix phone number: must be in + format or remove countryShortName if unsure
+    phone_value = participant_data.get("phone", "")
+    if not phone_value.startswith("+"):
+        phone_value = "+" + phone_value.lstrip("+")
+
     column_values = {
         "name": participant_data.get("name", ""),
         "email_mkrjhbqe": {
             "email": participant_data.get("email", ""),
-            "text": participant_data.get("name", "GPT Lead")
+            "text": participant_data.get("email", "")
         },
         "phone_mkrj1e0m": {
-            "phone": participant_data.get("phone", ""),
-            "countryShortName": "us"
+            "phone": phone_value
         },
         "text_mkrk7xqa": participant_data.get("dob", ""),
         "text_mkrjg9tz": participant_data.get("location", ""),
