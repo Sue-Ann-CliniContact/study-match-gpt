@@ -15,8 +15,8 @@ def match_studies(participant_data, all_studies):
     for study in all_studies:
         title = study.get("title", "")
         eligibility = study.get("eligibility_criteria", "").lower()
-        cities = [loc["city"].lower() for loc in study.get("locations", []) if loc.get("city")]
-        zipcodes = [loc["zip"].lower() for loc in study.get("locations", []) if loc.get("zip")]
+        cities = [loc.get("city", "").lower() for loc in study.get("locations", []) if loc.get("city")]
+        zipcodes = [loc.get("zip", "").lower() for loc in study.get("locations", []) if loc.get("zip")]
         min_age = study.get("min_age")
         max_age = study.get("max_age")
         condition = study.get("condition", "").lower()
@@ -40,7 +40,7 @@ def match_studies(participant_data, all_studies):
         if location:
             found = False
             for city in cities:
-                if city in location:
+                if city and city in location:
                     found = True
                     break
             for zipc in zipcodes:
