@@ -7,34 +7,55 @@ import json
 import re
 from matcher import match_studies
 from utils import format_matches_for_gpt
+from push_to_monday import push_to_monday
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 app = FastAPI()
 
 SYSTEM_PROMPT = """You are a clinical trial assistant named Hey Trial. Your job is to collect the following info one-by-one in a conversational tone:
-- Name of participant (optional)
-- Age (required)
-- Location (required)
-- Diagnosis (must mention autism)
-- Other medical conditions
-- Phone number
-- Email address
+- Name
+- Email Address
+- Phone Number
+- Date of birth
+- City, State and Zipcode
+- Are you the person with autism, or are you filling this out on their behalf?
+- Can you receive text messages about studies?
+- Has the individual been officially diagnosed with Autism Spectrum Disorder (ASD)?
+- At what age was the diagnosis made?
+- Is the individual verbal or non-verbal?
+- Are they currently taking any medications for ASD or related conditions?
+- What medications are they taking?
+- Do they have any co-occurring conditions? (e.g., ADHD, anxiety, epilepsy)
+- Are there any mobility limitations?
+- Are they currently in school or a program?
+- Are they open to in-person visits or only remote studies?
+- Are you only interested in pediatric/adult studies?
+- Are there any specific goals for participating (e.g., access to therapy, contributing to research)?
 
-Ask only one question at a time in a friendly tone. Use the user's previous answers to skip ahead. Never repeat questions.
-
-Once all info is collected, return this dictionary only:
+Ask one question at a time in a friendly tone. Use previous answers to skip ahead. Once all answers are collected, return only this dictionary:
 
 {
   "name": ...,
-  "age": ...,
-  "location": ...,
-  "diagnosis": ...,
-  "phone": ...,
   "email": ...,
-  "other_conditions": ...
+  "phone": ...,
+  "dob": ...,
+  "location": ...,
+  "relation": ...,
+  "text_opt_in": ...,
+  "diagnosis": ...,
+  "diagnosis_age": ...,
+  "verbal": ...,
+  "medications": ...,
+  "medication_names": ...,
+  "co_conditions": ...,
+  "mobility": ...,
+  "school_program": ...,
+  "visit_type": ...,
+  "study_age_focus": ...,
+  "study_goals": ...
 }
 
-Say nothing else in that message. Do not try to match or explain yet."""
+Say nothing else in that message. Do not match studies or explain yet."""
 
 chat_histories = {}
 
@@ -62,9 +83,16 @@ async def chat_handler(request: Request):
     if match:
         try:
             participant_data = json.loads(match.group())
+
+            # Push to Monday.com
+            push_to_monday(participant_data)
+
+            # Match studies
             with open("indexed_studies.json", "r") as f:
                 all_studies = json.load(f)
             matches = match_studies(participant_data, all_studies)
+
+            # Format and return
             match_summary = format_matches_for_gpt(matches)
             chat_histories[session_id].append({"role": "user", "content": match_summary})
             followup_response = openai.ChatCompletion.create(
