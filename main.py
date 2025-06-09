@@ -108,6 +108,8 @@ async def chat_handler(request: Request):
 
             # Format and return
             match_summary = format_matches_for_gpt(matches)
+            print("Match summary to GPT:", match_summary)
+            
             chat_histories[session_id].append({"role": "user", "content": match_summary})
             followup_response = openai.ChatCompletion.create(
                 model="gpt-4",
