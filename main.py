@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from pydantic import BaseModel
 import openai
 import os
 import json
@@ -6,6 +7,7 @@ import re
 from matcher import match_studies
 from utils import format_matches_for_gpt
 from push_to_monday import push_to_monday
+from datetime import datetime
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 app = FastAPI()
@@ -33,29 +35,37 @@ SYSTEM_PROMPT = """You are a clinical trial assistant named Hey Trial. Your job 
 Ask one question at a time in a friendly tone. Use previous answers to skip ahead. Once all answers are collected, return only this dictionary:
 
 {
-  "name": ...,
-  "email": ...,
-  "phone": ...,
-  "dob": ...,
-  "location": ...,
-  "relation": ...,
-  "text_opt_in": ...,
-  "diagnosis": ...,
-  "diagnosis_age": ...,
-  "verbal": ...,
-  "medications": ...,
-  "medication_names": ...,
-  "co_conditions": ...,
-  "mobility": ...,
-  "school_program": ...,
-  "visit_type": ...,
-  "study_age_focus": ...,
+  "name": ..., 
+  "email": ..., 
+  "phone": ..., 
+  "dob": ..., 
+  "location": ..., 
+  "relation": ..., 
+  "text_opt_in": ..., 
+  "diagnosis": ..., 
+  "diagnosis_age": ..., 
+  "verbal": ..., 
+  "medications": ..., 
+  "medication_names": ..., 
+  "co_conditions": ..., 
+  "mobility": ..., 
+  "school_program": ..., 
+  "visit_type": ..., 
+  "study_age_focus": ..., 
   "study_goals": ...
 }
 
 Say nothing else in that message. Do not match studies or explain yet."""
 
 chat_histories = {}
+
+def calculate_age(dob_str):
+    try:
+        dob = datetime.strptime(dob_str, "%B %d, %Y")
+        today = datetime.today()
+        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    except:
+        return None
 
 @app.post("/chat")
 async def chat_handler(request: Request):
@@ -68,19 +78,23 @@ async def chat_handler(request: Request):
 
     chat_histories[session_id].append({"role": "user", "content": user_input})
 
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         model="gpt-4",
         messages=chat_histories[session_id],
         temperature=0.5
     )
 
-    gpt_message = response.choices[0].message["content"]
+    gpt_message = response.choices[0].message.content
     chat_histories[session_id].append({"role": "assistant", "content": gpt_message})
 
     match = re.search(r'{[\s\S]*}', gpt_message)
     if match:
         try:
             participant_data = json.loads(match.group())
+            print("Extracted participant data:", participant_data)
+
+            # Add age from DOB
+            participant_data["age"] = calculate_age(participant_data.get("dob", ""))
 
             # Push to Monday.com
             push_to_monday(participant_data)
@@ -89,19 +103,20 @@ async def chat_handler(request: Request):
             with open("indexed_studies.json", "r") as f:
                 all_studies = json.load(f)
             matches = match_studies(participant_data, all_studies)
+            print("Found matches:", matches)
 
             # Format and return
             match_summary = format_matches_for_gpt(matches)
             chat_histories[session_id].append({"role": "user", "content": match_summary})
-            followup_response = openai.ChatCompletion.create(
+            followup_response = openai.chat.completions.create(
                 model="gpt-4",
                 messages=chat_histories[session_id],
                 temperature=0.5
             )
-            final_reply = followup_response.choices[0].message["content"]
+            final_reply = followup_response.choices[0].message.content
             return {"reply": final_reply}
         except Exception as e:
-            return {"reply": "We encountered an error processing your info.", "error": str(e)} 
+            return {"reply": "We encountered an error processing your info.", "error": str(e)}
 
     return {"reply": gpt_message}
 
