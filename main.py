@@ -101,15 +101,22 @@ async def chat_handler(request: Request):
             push_to_monday(participant_data)
 
             # Match studies
+            print("Opening indexed_studies.json...")
             with open("indexed_studies.json", "r") as f:
                 all_studies = json.load(f)
-            matches = match_studies(participant_data, all_studies)
-            print("Found matches:", matches)
+            print("Loaded studies:", len(all_studies))
+
+            try:
+                matches = match_studies(participant_data, all_studies)
+                print("Found matches:", matches)
+            except Exception as e:
+                print("Error during study matching:", str(e))
+                matches = []
 
             # Format and return
             match_summary = format_matches_for_gpt(matches)
             print("Match summary to GPT:", match_summary)
-            
+
             chat_histories[session_id].append({"role": "user", "content": match_summary})
             followup_response = openai.ChatCompletion.create(
                 model="gpt-4",
