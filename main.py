@@ -1,6 +1,6 @@
+
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
-import openai
 import os
 import json
 import re
@@ -8,9 +8,9 @@ from matcher import match_studies
 from utils import format_matches_for_gpt
 from push_to_monday import push_to_monday
 from datetime import datetime
+from openai import OpenAI
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-app = FastAPI()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 SYSTEM_PROMPT = """You are a clinical trial assistant named Hey Trial. Your job is to collect the following info one-by-one in a conversational tone:
 - Name
@@ -67,6 +67,8 @@ def calculate_age(dob_str):
     except:
         return None
 
+app = FastAPI()
+
 @app.post("/chat")
 async def chat_handler(request: Request):
     body = await request.json()
@@ -78,7 +80,7 @@ async def chat_handler(request: Request):
 
     chat_histories[session_id].append({"role": "user", "content": user_input})
 
-    response = openai.chat.completions.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=chat_histories[session_id],
         temperature=0.5
@@ -108,7 +110,7 @@ async def chat_handler(request: Request):
             # Format and return
             match_summary = format_matches_for_gpt(matches)
             chat_histories[session_id].append({"role": "user", "content": match_summary})
-            followup_response = openai.chat.completions.create(
+            followup_response = client.chat.completions.create(
                 model="gpt-4",
                 messages=chat_histories[session_id],
                 temperature=0.5
