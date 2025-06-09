@@ -1,5 +1,4 @@
 from fastapi import FastAPI, Request
-from pydantic import BaseModel
 import openai
 import os
 import json
@@ -65,9 +64,9 @@ async def chat_handler(request: Request):
     user_input = body.get("message")
 
     if session_id not in chat_histories:
-        chat_histories[session_id] = [{{"role": "system", "content": SYSTEM_PROMPT}}]
+        chat_histories[session_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    chat_histories[session_id].append({{"role": "user", "content": user_input}})
+    chat_histories[session_id].append({"role": "user", "content": user_input})
 
     response = openai.ChatCompletion.create(
         model="gpt-4",
@@ -76,9 +75,9 @@ async def chat_handler(request: Request):
     )
 
     gpt_message = response.choices[0].message["content"]
-    chat_histories[session_id].append({{"role": "assistant", "content": gpt_message}})
+    chat_histories[session_id].append({"role": "assistant", "content": gpt_message})
 
-    match = re.search(r'{{[\s\S]*}}', gpt_message)
+    match = re.search(r'{[\s\S]*}', gpt_message)
     if match:
         try:
             participant_data = json.loads(match.group())
@@ -93,18 +92,18 @@ async def chat_handler(request: Request):
 
             # Format and return
             match_summary = format_matches_for_gpt(matches)
-            chat_histories[session_id].append({{"role": "user", "content": match_summary}})
+            chat_histories[session_id].append({"role": "user", "content": match_summary})
             followup_response = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=chat_histories[session_id],
                 temperature=0.5
             )
             final_reply = followup_response.choices[0].message["content"]
-            return {{"reply": final_reply}}
+            return {"reply": final_reply}
         except Exception as e:
-            return {{"reply": "We encountered an error processing your info.", "error": str(e)}} 
+            return {"reply": "We encountered an error processing your info.", "error": str(e)} 
 
-    return {{"reply": gpt_message}}
+    return {"reply": gpt_message}
 
 if __name__ == "__main__":
     import uvicorn
