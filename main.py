@@ -14,7 +14,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten to your domain in production
+    allow_origins=["*"],  # or your domain in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -24,9 +24,9 @@ SYSTEM_PROMPT = """You are a clinical trial assistant named Hey Trial. Your job 
 - Name
 - Email Address
 - Phone Number
+- Are you the person with autism, or are you filling this out on their behalf?
 - Date of birth
 - City, State and Zipcode
-- Are you the person with autism, or are you filling this out on their behalf?
 - Can you receive text messages about studies?
 - Has the individual been officially diagnosed with Autism Spectrum Disorder (ASD)?
 - At what age was the diagnosis made?
@@ -46,9 +46,9 @@ Ask one question at a time in a friendly tone. Use previous answers to skip ahea
   "name": ..., 
   "email": ..., 
   "phone": ..., 
+  "relation": ..., 
   "dob": ..., 
   "location": ..., 
-  "relation": ..., 
   "text_opt_in": ..., 
   "diagnosis": ..., 
   "diagnosis_age": ..., 
@@ -86,7 +86,7 @@ async def chat_handler(request: Request):
 
     chat_histories[session_id].append({"role": "user", "content": user_input})
 
-    # First call: collect participant info
+    # 1) Collect participant info
     response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=chat_histories[session_id],
@@ -95,30 +95,30 @@ async def chat_handler(request: Request):
     gpt_message = response.choices[0].message["content"]
     chat_histories[session_id].append({"role": "assistant", "content": gpt_message})
 
-    # If GPT returned the participant dict, process studies
+    # 2) If GPT returned the JSON dict, process studies
     match = re.search(r'{[\s\S]*}', gpt_message)
     if match:
         try:
             participant_data = json.loads(match.group())
-            # Calculate age
+            # Calculate age from the collected DOB (now correctly referring to the child)
             participant_data["age"] = calculate_age(participant_data.get("dob", ""))
 
             # Push to Monday.com
             push_to_monday(participant_data)
 
-            # Load studies and match
+            # Load and match studies
             with open("indexed_studies.json", "r") as f:
                 all_studies = json.load(f)
             matches = match_studies(participant_data, all_studies)
 
-            # **Directly format and return** the study summaries
+            # Directly format & return the study summaries
             match_summary = format_matches_for_gpt(matches)
             return {"reply": match_summary}
 
         except Exception as e:
             return {"reply": "We encountered an error processing your info.", "error": str(e)}
 
-    # Otherwise, just echo GPT’s current message
+    # 3) Otherwise, echo GPT’s prompt flow
     return {"reply": gpt_message}
 
 if __name__ == "__main__":
