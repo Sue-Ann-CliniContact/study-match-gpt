@@ -1,42 +1,36 @@
-def format_matches_for_gpt(matches):
-    if not matches:
-        return (
-            "Unfortunately, no studies matched based on your details. "
-            "Would you like us to follow up if new ones become available?"
-        )
+from datetime import datetime
+from geopy.geocoders import Nominatim
 
-    # Group by distance bucket
-    grouped = {"Near you": [], "National": [], "Remote": []}
-    for study in matches:
-        bucket = study.get("distance_bucket", "National")
-        grouped.setdefault(bucket, []).append(study)
+geolocator = Nominatim(user_agent="heytrial-matcher")
 
-    output = "Here are some clinical studies that may be a fit:\n\n"
+def extract_participant_data(chat_history):
+    if not isinstance(chat_history, list):
+        raise ValueError("Chat history must be a list")
 
-    for group_label in ["Near you", "National", "Remote"]:
-        group = grouped.get(group_label, [])
-        if not group:
-            continue
+    info = {}
+    for msg in chat_history:
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            text = msg.get("content", "").lower()
+            if "date of birth" in text or "born" in text:
+                dob_str = text.split("born")[-1].strip() if "born" in text else text.split("birth is")[-1].strip()
+                try:
+                    dob = datetime.strptime(dob_str, "%B %d, %Y")
+                    age = (datetime.now() - dob).days // 365
+                    info["age"] = age
+                except:
+                    pass
+            if "we live in" in text:
+                location = text.split("we live in")[-1].split(".")[0].strip()
+                info["location"] = location
+                try:
+                    loc = geolocator.geocode(location)
+                    if loc:
+                        info["location_coords"] = (loc.latitude, loc.longitude)
+                except:
+                    pass
+            if "diagnosed with autism" in text or "has autism" in text:
+                info["diagnosed"] = True
+            if "she is verbal" in text or "he is verbal" in text:
+                info["verbal"] = True
 
-        output += f"### {group_label}\n\n"
-        for idx, study in enumerate(group, 1):
-            reasons = study.get("match_reason", [])
-            rationale = "; ".join(reasons) if reasons else 'No specific rationale provided.'
-
-            score = study.get("match_score")
-            if score:
-                score_str = f"{score:.1f}/10"
-            else:
-                score_str = "N/A"
-
-            output += f"**{idx}. {study['title']}** (Match Score: {score_str})\n"
-            output += f"- **Location**: {study['location']}, {study['state']}\n"
-            output += f"- **Study Link**: [View Study]({study['url']})\n"
-            output += f"- **Summary**: {study['summary']}\n"
-            output += f"- **Eligibility Overview**: {study['eligibility'] or 'Not provided'}\n"
-            output += (
-                f"- **Contact**: {study['contact_name']} | {study['contact_email']} | {study['contact_phone']}\n"
-            )
-            output += f"- **Match Rationale**: {rationale}\n\n"
-
-    return output.strip()
+    return info

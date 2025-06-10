@@ -1,74 +1,98 @@
-import re
+import json
 from geopy.distance import geodesic
+import math
 
-def is_autism_related(text):
-    autism_keywords = ["autism", "autistic", "ASD", "spectrum disorder"]
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in autism_keywords)
+# Load the indexed studies once
+with open("indexed_studies.json", "r", encoding="utf-8") as f:
+    studies = json.load(f)
 
-def get_distance_bucket(distance_miles):
-    if distance_miles < 50:
-        return "Near You"
-    elif distance_miles < 200:
-        return "In Your State"
-    else:
-        return "National"
-
-def compute_match_score(study, participant_coords, participant_age):
-    score = 0
-    condition = study.get("condition_summary", "").lower()
-    eligibility = study.get("eligibility", "").lower()
-
-    if is_autism_related(f"{condition} {eligibility}"):
-        score += 5
-
-    if study.get("country", "") != "United States":
-        return -1, "Excluded: Non-US Study"
-
-    study_coords = study.get("coordinates", None)
-    distance_miles = 9999
-    if study_coords and participant_coords:
-        distance_miles = geodesic(participant_coords, study_coords).miles
-        if distance_miles < 50:
-            score += 3
-        elif distance_miles < 200:
-            score += 2
-        elif distance_miles < 1000:
-            score += 1
-
+def calculate_distance(user_coords, study_location):
     try:
-        min_age = int(study.get("min_age_years", -1))
-        max_age = int(study.get("max_age_years", -1))
-        if (min_age >= 0 and participant_age < min_age) or (max_age >= 0 and participant_age > max_age):
-            return -1, "Excluded: Age not in range"
-        else:
-            score += 1
+        return geodesic(user_coords, study_location).miles
     except:
-        pass
+        return None
 
-    confidence = round((score / 10) * 10, 1)
-    rationale = f"{confidence}/10 match based on age, condition, and proximity ({get_distance_bucket(distance_miles)})"
-    return score, rationale
+def assess_match_score(study, data):
+    score = 0
+    reasons = []
 
-def match_studies(studies, participant_data):
-    if isinstance(participant_data, list):
-        participant_data = participant_data[0]
+    # Age match
+    age = data.get("age")
+    age_ok = study.get("eligibility", {}).get("min_age", 0) <= age <= study.get("eligibility", {}).get("max_age", 150)
+    if age_ok:
+        score += 3
+        reasons.append("Age eligibility matched")
+    else:
+        reasons.append("Age not within range")
 
-    participant_coords = participant_data.get("coordinates", None)
-    participant_age = participant_data.get("age", None)
+    # Diagnosis match
+    diagnosis_keywords = ["autism", "asd", "autism spectrum"]
+    if any(word in study.get("summary", "").lower() for word in diagnosis_keywords):
+        score += 3
+        reasons.append("Diagnosis criteria matched")
 
-    matched = []
+    # Location match
+    user_location = data.get("location_coords")
+    study_location = study.get("location_coords")
+    if user_location and study_location:
+        distance = calculate_distance(user_location, study_location)
+        if distance is not None:
+            if distance < 50:
+                score += 3
+                reasons.append("Study is nearby (<50 miles)")
+            elif distance < 300:
+                score += 2
+                reasons.append("Study is within 300 miles")
+            else:
+                reasons.append("Study is distant (>300 miles)")
+        else:
+            reasons.append("Unable to calculate distance")
+    else:
+        reasons.append("Location not provided")
+
+    return score, reasons
+
+def match_studies(data):
+    if not isinstance(data, dict):
+        raise ValueError("Participant data must be a dictionary.")
+
+    matches = []
     for study in studies:
-        score, rationale = compute_match_score(study, participant_coords, participant_age)
-        if score >= 0:
-            matched.append({
-                "study": study,
-                "score": score,
-                "match_rationale": rationale,
-                "distance_bucket": get_distance_bucket(
-                    geodesic(participant_coords, study["coordinates"]).miles
-                    if participant_coords and "coordinates" in study else 9999
-                )
-            })
+        score, reasons = assess_match_score(study, data)
+        matches.append({
+            "name": study.get("title", "N/A"),
+            "location": study.get("location", "Unknown"),
+            "link": study.get("url"),
+            "summary": study.get("summary", "No summary provided."),
+            "eligibility": study.get("eligibility_text", "Not available."),
+            "contact": study.get("contact", "Not listed"),
+            "match_rationale": ", ".join(reasons),
+            "match_score": round(score / 9 * 10, 1)
+        })
 
-    return sorted(matched, key=lambda x: x["score"], reverse=True)
+    matches.sort(key=lambda x: -x["match_score"])
+
+    # Grouped text output
+    grouped_output = "Here are some clinical studies that may be a fit:
+"
+    for match in matches[:10]:
+        grouped_output += (
+            f"
+📍 {match['name']}
+"
+            f"- Location: {match['location']}
+"
+            f"- Study Link: {match['link']}
+"
+            f"- Summary: {match['summary']}
+"
+            f"- Eligibility Overview: {match['eligibility']}
+"
+            f"- Contact: {match['contact']}
+"
+            f"- Match Score: {match['match_score']}/10
+"
+            f"- Match Rationale: {match['match_rationale']}
+"
+        )
+    return grouped_output
