@@ -1,153 +1,81 @@
 
-def calculate_match_confidence(study: dict, user_data: dict) -> float:
-    score = 0
-    max_score = 3
-
-    if "autism" in (study.get("condition_summary", "") + study.get("eligibility", "")).lower():
-        score += 1
-
-    user_age = user_data.get("age")
-    if user_age is not None:
-        min_age = study.get("min_age", 0)
-        max_age = study.get("max_age", 200)
-        if min_age <= user_age <= max_age:
-            score += 1
-
-    if "united states" in study.get("location", "").lower():
-        score += 1
-
-    return round((score / max_score) * 10, 1)
-
-def categorize_by_proximity(study: dict, user_zip: str) -> str:
-    location = study.get("location", "").lower()
-    if "san francisco" in location or user_zip in location:
-        return "🟢 Near You"
-    elif "united states" in location:
-        return "🟡 National"
-    else:
-        return "🔴 International"
-
-
-# matcher.py (updated)
 import re
 from geopy.distance import geodesic
+
 
 def is_autism_related(text):
     autism_keywords = ["autism", "autistic", "ASD", "spectrum disorder"]
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in autism_keywords)
 
-def compute_score(study, participant_coords):
+
+def get_distance_bucket(distance_miles):
+    if distance_miles < 50:
+        return "Near You"
+    elif distance_miles < 200:
+        return "In Your State"
+    else:
+        return "National"
+
+
+def compute_match_score(study, participant_coords, participant_age):
     score = 0
     condition = study.get("condition_summary", "").lower()
     eligibility = study.get("eligibility", "").lower()
-    keywords = ["autism", "asd", "autistic", "spectrum disorder"]
-    if any(k in f"{condition} {eligibility}" for k in keywords):
+
+    # Base relevance if autism is mentioned
+    if is_autism_related(f"{condition} {eligibility}"):
         score += 5
 
-    study_city = study.get("location", "")
-    study_country = study.get("country", "")
-    # filter out non-US
-    if study_country != "United States":
-        return -1
+    # Country check
+    if study.get("country", "") != "United States":
+        return -1, "Excluded: Non-US Study"
 
-    # determine study coordinates
-    if "dallas" in study_city.lower():
-        study_coords = (32.7767, -96.7970)
-    elif "boston" in study_city.lower():
-        study_coords = (42.3601, -71.0589)
-    elif "bethesda" in study_city.lower():
-        study_coords = (38.9847, -77.0947)
-    elif "new york" in study_city.lower():
-        study_coords = (40.7128, -74.0060)
-    else:
-        study_coords = (38.0, -97.0)
+    # Location distance
+    study_coords = study.get("coordinates", None)
+    distance_miles = 9999
+    if study_coords and participant_coords:
+        distance_miles = geodesic(participant_coords, study_coords).miles
+        if distance_miles < 50:
+            score += 3
+        elif distance_miles < 200:
+            score += 2
+        elif distance_miles < 1000:
+            score += 1
 
-    distance = geodesic(participant_coords, study_coords).miles
-    if distance <= 25:
-        score += 3
-    elif distance <= 100:
-        score += 2
-    elif distance <= 300:
-        score += 1
-
-    return score
-
-def match_studies(participant, studies):
-    matched_studies = []
-    participant_coords = (32.7767, -96.7970)  # Dallas fallback
-    age = participant.get("age", 0)
+    # Age filtering
     try:
-        age = int(age)
+        min_age = int(study.get("min_age_years", -1))
+        max_age = int(study.get("max_age_years", -1))
+        if (min_age >= 0 and participant_age < min_age) or (max_age >= 0 and participant_age > max_age):
+            return -1, "Excluded: Age not in range"
+        else:
+            score += 1
     except:
-        age = 0
+        pass
+
+    confidence = round((score / 10) * 10, 1)  # Normalize to a 10-point scale
+    return score, f"{confidence}/10 match based on age, condition, and proximity ({get_distance_bucket(distance_miles)})"
+
+
+def match_studies(studies, participant_data):
+    matched = []
+
+    participant_coords = participant_data.get("coordinates", None)
+    participant_age = participant_data.get("age", None)
 
     for study in studies:
-        try:
-            if not isinstance(study, dict):
-                continue
+        score, rationale = compute_match_score(study, participant_coords, participant_age)
+        if score >= 0:
+            matched.append({
+                "study": study,
+                "score": score,
+                "match_rationale": rationale,
+                "distance_bucket": get_distance_bucket(
+                    geodesic(participant_coords, study["coordinates"]).miles
+                    if participant_coords and "coordinates" in study else 9999
+                )
+            })
 
-            # autism relevance
-            combined_text = (study.get("condition_summary", "") or "") + " " + (study.get("eligibility", "") or "")
-            if not is_autism_related(combined_text):
-                continue
-
-            # parse age bounds
-            min_age_raw = study.get("min_age", "N/A")
-            max_age_raw = study.get("max_age", "N/A")
-            try:
-                min_age_val = int(re.findall(r"\d+", min_age_raw)[0]) if re.findall(r"\d+", min_age_raw) else 0
-                max_age_val = int(re.findall(r"\d+", max_age_raw)[0]) if re.findall(r"\d+", max_age_raw) else 120
-            except:
-                min_age_val, max_age_val = 0, 120
-
-            if not (min_age_val <= age <= max_age_val):
-                continue
-
-            # compute score and rationale
-            score = compute_score(study, participant_coords)
-            if score < 0:
-                continue
-            rationale = []
-            if score >= 8:
-                rationale.append("Very strong match based on condition, location, and age")
-            elif score >= 6:
-                rationale.append("Strong match based on condition and location")
-            elif score >= 3:
-                rationale.append("Moderate match based on condition or proximity")
-            else:
-                rationale.append("Possible match based on condition relevance")
-
-            # build match object
-            nct_id = study.get("nct_id", "")
-            url = study.get("url") or (f"https://clinicaltrials.gov/ct2/show/{nct_id}" if nct_id else None)
-            link = study.get("link", url)
-            city = study.get("location", "Location N/A")
-            title = study.get("title", "No Title")
-            summary = study.get("summary") or f"{title} in {city}, recruiting ages {min_age_raw} to {max_age_raw}."
-
-            match = {
-                "nct_id": nct_id,
-                "title": title,
-                "description": study.get("description", ""),
-                "eligibility": study.get("eligibility", ""),
-                "min_age": min_age_raw,
-                "max_age": max_age_raw,
-                "location": city,
-                "state": study.get("state", ""),
-                "country": study.get("country", ""),
-                "status": study.get("status", ""),
-                "link": link,
-                "url": url,
-                "contact_name": study.get("contact_name", "Not available"),
-                "contact_email": study.get("contact_email", "Not available"),
-                "contact_phone": study.get("contact_phone", "Not available"),
-                "match_score": score,
-                "summary": summary,
-                "match_reason": rationale,
-            }
-            matched_studies.append(match)
-        except Exception:
-            continue
-
-    return sorted(matched_studies, key=lambda x: x["match_score"], reverse=True)[:10]
+    # Sort by score descending
+    return sorted(matched, key=lambda x: x["score"], reverse=True)
