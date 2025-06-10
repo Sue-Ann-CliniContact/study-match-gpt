@@ -31,8 +31,9 @@ def match_studies(participant_data, all_studies):
         print("Zipcodes:", zipcodes)
         print("Min age:", min_age, "Max age:", max_age)
 
-        # ✅ Fix: Check for any autism keyword, case-insensitively
-        if not any(keyword.lower() in condition or keyword.lower() in eligibility for keyword in autism_keywords):
+        # ✅ Updated: Check for autism keywords in title, condition, or eligibility
+        searchable_text = f"{title.lower()} {condition} {eligibility}"
+        if not any(keyword in searchable_text for keyword in autism_keywords):
             print("❌ Skipped: No autism keyword found")
             continue
 
