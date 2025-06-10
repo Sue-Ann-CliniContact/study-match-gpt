@@ -1,13 +1,10 @@
-
 import re
 from geopy.distance import geodesic
-
 
 def is_autism_related(text):
     autism_keywords = ["autism", "autistic", "ASD", "spectrum disorder"]
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in autism_keywords)
-
 
 def get_distance_bucket(distance_miles):
     if distance_miles < 50:
@@ -17,21 +14,17 @@ def get_distance_bucket(distance_miles):
     else:
         return "National"
 
-
 def compute_match_score(study, participant_coords, participant_age):
     score = 0
     condition = study.get("condition_summary", "").lower()
     eligibility = study.get("eligibility", "").lower()
 
-    # Base relevance if autism is mentioned
     if is_autism_related(f"{condition} {eligibility}"):
         score += 5
 
-    # Country check
     if study.get("country", "") != "United States":
         return -1, "Excluded: Non-US Study"
 
-    # Location distance
     study_coords = study.get("coordinates", None)
     distance_miles = 9999
     if study_coords and participant_coords:
@@ -43,7 +36,6 @@ def compute_match_score(study, participant_coords, participant_age):
         elif distance_miles < 1000:
             score += 1
 
-    # Age filtering
     try:
         min_age = int(study.get("min_age_years", -1))
         max_age = int(study.get("max_age_years", -1))
@@ -54,16 +46,18 @@ def compute_match_score(study, participant_coords, participant_age):
     except:
         pass
 
-    confidence = round((score / 10) * 10, 1)  # Normalize to a 10-point scale
-    return score, f"{confidence}/10 match based on age, condition, and proximity ({get_distance_bucket(distance_miles)})"
-
+    confidence = round((score / 10) * 10, 1)
+    rationale = f"{confidence}/10 match based on age, condition, and proximity ({get_distance_bucket(distance_miles)})"
+    return score, rationale
 
 def match_studies(studies, participant_data):
-    matched = []
+    if isinstance(participant_data, list):
+        participant_data = participant_data[0]
 
     participant_coords = participant_data.get("coordinates", None)
     participant_age = participant_data.get("age", None)
 
+    matched = []
     for study in studies:
         score, rationale = compute_match_score(study, participant_coords, participant_age)
         if score >= 0:
@@ -77,5 +71,4 @@ def match_studies(studies, participant_data):
                 )
             })
 
-    # Sort by score descending
     return sorted(matched, key=lambda x: x["score"], reverse=True)
