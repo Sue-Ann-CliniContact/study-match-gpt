@@ -110,20 +110,12 @@ async def chat_handler(request: Request):
             matches = match_studies(participant_data, all_studies)
             match_summary = format_matches_for_gpt(matches)
 
-            if not matches:
-                return {"reply": match_summary}
+            print("MATCHED STUDIES:", matches)
+            print("FEEDING THIS TO GPT FOR FOLLOW-UP:\n", match_summary)
 
-            chat_histories[session_id].append({
-                "role": "user",
-                "content": "Here are some matched studies for a participant. Please summarize and ask if they want help with next steps:\n\n" + match_summary
-            })
-            followup_response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=chat_histories[session_id],
-                temperature=0.5
-            )
-            final_reply = followup_response.choices[0].message["content"]
-            return {"reply": final_reply}
+            # DIAGNOSTIC: Return formatted output directly
+            return {"reply": match_summary}
+
         except Exception as e:
             return {"reply": "We encountered an error processing your info.", "error": str(e)}
 
