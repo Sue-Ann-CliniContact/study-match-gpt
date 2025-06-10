@@ -1,3 +1,4 @@
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 import openai
@@ -12,6 +13,13 @@ from datetime import datetime
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # or ["https://www.clinicontact.com"] for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 SYSTEM_PROMPT = """You are a clinical trial assistant named Hey Trial. Your job is to collect the following info one-by-one in a conversational tone:
 - Name
