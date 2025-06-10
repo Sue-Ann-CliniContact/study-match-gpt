@@ -1,4 +1,6 @@
-
+import os
+port = int(os.environ.get("PORT", 10000))  # Render will set PORT; fallback for local testing
+uvicorn.run("main:app", host="0.0.0.0", port=port)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
