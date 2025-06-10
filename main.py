@@ -4,7 +4,7 @@ import openai
 import os
 import json
 import re
-from matcher_ranked import match_studies
+from matcher import match_studies
 from utils import format_matches_for_gpt
 from push_to_monday import push_to_monday
 from datetime import datetime
