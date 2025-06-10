@@ -71,14 +71,21 @@ async def chat_handler(req: ChatRequest):
     assistant_msg = completion.choices[0].message["content"]
     chat_histories[session].append({"role": "assistant", "content": assistant_msg})
 
-    # If GPT returned JSON, parse & match
-    json_match = re.search(r'\{[\s\S]*\}', assistant_msg)
-    if json_match:
-        try:
-            data = json.loads(json_match.group())
-            data["age"] = calculate_age(data.get("dob", ""))
-            participant = data  # keep raw keys for matcher
-            push_to_monday(participant)
+        # If GPT returned JSON, parse & match
+        if "{" in assistant_msg and "}" in assistant_msg:
+            try:
+                start = assistant_msg.index("{")
+                end = assistant_msg.rindex("}") + 1
+                json_str = assistant_msg[start:end]
+                data = json.loads(json_str)
+
+                data["age"] = calculate_age(data.get("dob", ""))
+                participant = data  # keep raw keys for matcher
+                push_to_monday(participant)
+        except (json.JSONDecodeError, ValueError, AttributeError) as e:
+            print("⚠️ Failed to parse JSON from GPT response.")
+            print("Raw assistant message:\n", assistant_msg)
+            print("Error:\n", str(e))
 
             with open("indexed_studies.json", "r", encoding="utf-8") as f:
                 studies = json.load(f)
