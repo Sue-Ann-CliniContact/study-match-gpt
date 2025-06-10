@@ -1,104 +1,130 @@
+
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request
+from pydantic import BaseModel
+import openai
 import os
 import json
 import re
-import openai
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from matcher import match_studies
 from utils import format_matches_for_gpt
 from push_to_monday import push_to_monday
 from datetime import datetime
-
-# ──────────────────────────────────────────────────────────────────────────────
-#                         YOUR ORIGINAL SYSTEM PROMPT
-# ──────────────────────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """
-You are Hey Trial, a friendly assistant for CliniContact.
-Your job is to help parents and individuals find suitable autism research studies.
-Use the conversation to:
-1. Collect participant information (name, DOB, location, diagnosis, verbal status, etc.).
-2. Push that data to Monday.com via the push_to_monday() function.
-3. Then match against your indexed_studies.json using match_studies().
-4. Finally, format the matches with grouping ("Near You", "National", "Other"),
-   include match scores, rationales, and full study details (link, summary, eligibility, contact).
-Always maintain a conversational tone, guiding the user step by step.
-"""
-# ──────────────────────────────────────────────────────────────────────────────
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict in prod
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+SYSTEM_PROMPT = """You are a clinical trial assistant named Hey Trial. Your job is to collect the following info one-by-one in a conversational tone:
+- Name
+- Email Address
+- Phone Number
+- Date of birth
+- City, State and Zipcode
+- Are you the person with autism, or are you filling this out on their behalf?
+- Can you receive text messages about studies?
+- Has the individual been officially diagnosed with Autism Spectrum Disorder (ASD)?
+- At what age was the diagnosis made?
+- Is the individual verbal or non-verbal?
+- Are they currently taking any medications for ASD or related conditions?
+- What medications are they taking?
+- Do they have any co-occurring conditions? (e.g., ADHD, anxiety, epilepsy)
+- Are there any mobility limitations?
+- Are they currently in school or a program?
+- Are they open to in-person visits or only remote studies?
+- Are you only interested in pediatric/adult studies?
+- Are there any specific goals for participating (e.g., access to therapy, contributing to research)?
+
+Ask one question at a time in a friendly tone. Use previous answers to skip ahead. Once all answers are collected, return only this dictionary:
+
+{
+  "name": ..., 
+  "email": ..., 
+  "phone": ..., 
+  "dob": ..., 
+  "location": ..., 
+  "relation": ..., 
+  "text_opt_in": ..., 
+  "diagnosis": ..., 
+  "diagnosis_age": ..., 
+  "verbal": ..., 
+  "medications": ..., 
+  "medication_names": ..., 
+  "co_conditions": ..., 
+  "mobility": ..., 
+  "school_program": ..., 
+  "visit_type": ..., 
+  "study_age_focus": ..., 
+  "study_goals": ...
+}
+
+Say nothing else in that message. Do not match studies or explain yet."""
+
 chat_histories = {}
 
-class ChatRequest(BaseModel):
-    session_id: str
-    message: str
-
-def calculate_age(dob_str: str) -> int:
-    for fmt in ("%B %d, %Y", "%d %B %Y", "%d %b %Y", "%Y-%m-%d"):
-        try:
-            dob = datetime.strptime(dob_str, fmt)
-            today = datetime.today()
-            return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-        except:
-            continue
-    return 0
+def calculate_age(dob_str):
+    try:
+        dob = datetime.strptime(dob_str, "%B %d, %Y")
+        today = datetime.today()
+        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    except:
+        return None
 
 @app.post("/chat")
-async def chat_handler(req: ChatRequest):
-    session = req.session_id or "default"
-    user_msg = req.message
+async def chat_handler(request: Request):
+    body = await request.json()
+    session_id = body.get("session_id", "default")
+    user_input = body.get("message")
 
-    if session not in chat_histories:
-        chat_histories[session] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if session_id not in chat_histories:
+        chat_histories[session_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    chat_histories[session].append({"role": "user", "content": user_msg})
+    chat_histories[session_id].append({"role": "user", "content": user_input})
 
-    completion = openai.ChatCompletion.create(
+    response = openai.ChatCompletion.create(
         model="gpt-4",
-        messages=chat_histories[session],
-        temperature=0.5,
+        messages=chat_histories[session_id],
+        temperature=0.5
     )
-    assistant_msg = completion.choices[0].message["content"]
-    chat_histories[session].append({"role": "assistant", "content": assistant_msg})
 
-    # If GPT returned JSON, parse & match
-    if "{" in assistant_msg and "}" in assistant_msg:
+    gpt_message = response.choices[0].message["content"]
+    chat_histories[session_id].append({"role": "assistant", "content": gpt_message})
+
+    match = re.search(r'{[\s\S]*}', gpt_message)
+    if match:
         try:
-            start = assistant_msg.index("{")
-            end = assistant_msg.rindex("}") + 1
-            json_str = assistant_msg[start:end]
-            data = json.loads(json_str)
+            participant_data = json.loads(match.group())
+            participant_data["age"] = calculate_age(participant_data.get("dob", ""))
+            push_to_monday(participant_data)
 
-            data["age"] = calculate_age(data.get("dob", ""))
-            participant = data  # keep raw keys for matcher
-            push_to_monday(participant)
-        except (json.JSONDecodeError, ValueError, AttributeError) as e:
-            print("⚠️ Failed to parse JSON from GPT response.")
-            print("Raw assistant message:\n", assistant_msg)
-            print("Error:\n", str(e))
+            with open("indexed_studies.json", "r") as f:
+                all_studies = json.load(f)
 
-            with open("indexed_studies.json", "r", encoding="utf-8") as f:
-                studies = json.load(f)
-            raw_matches = match_studies(participant, studies)
-            reply = format_matches_for_gpt(raw_matches)
-            return {"reply": reply}
+            matches = match_studies(participant_data, all_studies)
+            match_summary = format_matches_for_gpt(matches)
+
+            if not matches:
+                return {"reply": match_summary}
+
+            chat_histories[session_id].append({
+                "role": "user",
+                "content": "Here are some matched studies for a participant. Please summarize and ask if they want help with next steps:\n\n" + match_summary
+            })
+            followup_response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=chat_histories[session_id],
+                temperature=0.5
+            )
+            final_reply = followup_response.choices[0].message["content"]
+            return {"reply": final_reply}
         except Exception as e:
             return {"reply": "We encountered an error processing your info.", "error": str(e)}
 
-    return {"reply": assistant_msg}
-
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    return {"reply": gpt_message}
