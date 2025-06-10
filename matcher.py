@@ -1,3 +1,4 @@
+
 import re
 import difflib
 
@@ -17,7 +18,6 @@ def contains_autism_keyword(text, keywords):
     for kw in keywords:
         if kw in text:
             return True
-        # fuzzy fallback for minor typos like 'autisum'
         if difflib.get_close_matches(kw, text.split(), n=1, cutoff=0.85):
             return True
     return False
@@ -40,9 +40,9 @@ def match_studies(participant_data, all_studies):
     for study in all_studies:
         title = study.get("title", "")
         eligibility = study.get("eligibility_criteria", "").lower()
-        summary = study.get("brief_summary", "").lower()
-        description = study.get("detailed_description", "").lower()
-        condition = study.get("condition", "").lower()
+        summary = study.get("brief_summary", "").lower() if study.get("brief_summary") else ""
+        description = study.get("detailed_description", "").lower() if study.get("detailed_description") else ""
+        condition = study.get("condition", "").lower() if study.get("condition") else ""
         min_age = extract_age_number(study.get("min_age"))
         max_age = extract_age_number(study.get("max_age"))
         cities = [loc.get("city", "").lower() for loc in study.get("locations", []) if loc.get("city")]
@@ -76,7 +76,6 @@ def match_studies(participant_data, all_studies):
                 print(f"❌ Skipped: Age {age} > max_age {max_age}")
                 continue
 
-        # Location check
         if location:
             if not cities and not zipcodes:
                 print("✅ MATCH (no location constraints)")
@@ -89,6 +88,13 @@ def match_studies(participant_data, all_studies):
                 continue
 
         print("✅ MATCH")
-        matches.append(study)
+        matches.append({
+            "title": title,
+            "link": study.get("link", "No link provided"),
+            "location": f"{study.get('location', '')}, {study.get('state', '')}, {study.get('country', '')}".strip(", "),
+            "min_age": study.get("min_age"),
+            "max_age": study.get("max_age"),
+            "contact": f"{study.get('contact_name', 'N/A')} ({study.get('contact_email', 'N/A')})"
+        })
 
     return matches
