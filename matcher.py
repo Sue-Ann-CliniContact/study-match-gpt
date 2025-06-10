@@ -8,18 +8,18 @@ def is_autism_related(text):
 
 def compute_score(study, participant_coords):
     score = 0
+    # Boost for condition/eligibility keywords
     condition = study.get("condition_summary", "").lower()
     eligibility = study.get("eligibility", "").lower()
     keywords = ["autism", "asd", "autistic", "spectrum disorder"]
     if any(k in f"{condition} {eligibility}" for k in keywords):
         score += 5
 
+    # Location-based scoring
     study_city = study.get("location", "")
     study_country = study.get("country", "")
     if study_country != "United States":
-        return -1  # filter non-US
-
-    # map to coordinates
+        return -1  # exclude non-US studies
     if "dallas" in study_city.lower():
         coords = (32.7767, -96.7970)
     elif "boston" in study_city.lower():
@@ -30,7 +30,6 @@ def compute_score(study, participant_coords):
         coords = (40.7128, -74.0060)
     else:
         coords = (38.0, -97.0)
-
     distance = geodesic(participant_coords, coords).miles
     if distance <= 25:
         score += 3
@@ -43,7 +42,8 @@ def compute_score(study, participant_coords):
 
 def match_studies(participant, studies):
     matched_studies = []
-    participant_coords = (32.7767, -96.7970)  # Dallas fallback
+    # Default participant coords (Dallas)
+    participant_coords = (32.7767, -96.7970)
     try:
         age = int(participant.get("age", 0))
     except:
@@ -54,12 +54,12 @@ def match_studies(participant, studies):
             if not isinstance(study, dict):
                 continue
 
-            # 1. Autism relevance
-            combined = (study.get("condition_summary", "") or "") + " " + (study.get("eligibility", "") or "")
-            if not is_autism_related(combined):
+            # 1. Autism relevance check
+            text = (study.get("condition_summary", "") or "") + " " + (study.get("eligibility", "") or "")
+            if not is_autism_related(text):
                 continue
 
-            # 2. Age filtering
+            # 2. Age eligibility
             min_raw = study.get("min_age", "N/A")
             max_raw = study.get("max_age", "N/A")
             try:
@@ -70,7 +70,7 @@ def match_studies(participant, studies):
             if not (min_val <= age <= max_val):
                 continue
 
-            # 3. Scoring & rationale
+            # 3. Compute score and build rationale
             score = compute_score(study, participant_coords)
             if score < 0:
                 continue
@@ -84,36 +84,36 @@ def match_studies(participant, studies):
             else:
                 rationale.append("Possible match based on condition relevance")
 
-            # 4. Build match dict with all fields
+            # 4. Build match dictionary with full fields
             nct = study.get("nct_id", "")
             url = study.get("url") or (f"https://clinicaltrials.gov/ct2/show/{nct}" if nct else None)
             city = study.get("location", "N/A")
-            summary = study.get("summary") or f"{study.get('title', '')} in {city}, recruiting ages {min_raw} to {max_raw}."
+            title = study.get("title", "No Title")
+            summary = study.get("summary") or f"{title} in {city}, recruiting ages {min_raw} to {max_raw}."
 
             match = {
-                "nct_id":   nct,
-                "title":    study.get("title", "No Title"),
+                "nct_id": nct,
+                "title": title,
                 "description": study.get("description", ""),
                 "eligibility": study.get("eligibility", ""),
-                "min_age":    min_raw,
-                "max_age":    max_raw,
-                "location":   city,
-                "state":      study.get("state", ""),
-                "country":    study.get("country", ""),
-                "status":     study.get("status", ""),
-                "link":       study.get("link", url),
-                "url":        url,
-                "contact_name":  study.get("contact_name", "Not available"),
+                "min_age": min_raw,
+                "max_age": max_raw,
+                "location": city,
+                "state": study.get("state", ""),
+                "country": study.get("country", ""),
+                "status": study.get("status", ""),
+                "link": study.get("link", url),
+                "url": url,
+                "contact_name": study.get("contact_name", "Not available"),
                 "contact_email": study.get("contact_email", "Not available"),
                 "contact_phone": study.get("contact_phone", "Not available"),
-                "match_score":   score,
-                "summary":       summary,
-                "match_reason":  rationale,
+                "match_score": score,
+                "summary": summary,
+                "match_reason": rationale,
             }
             matched_studies.append(match)
-
-        except Exception:
+        except:
             continue
 
-    # Return top 10
+    # Return top 10 matches by score
     return sorted(matched_studies, key=lambda x: x["match_score"], reverse=True)[:10]
