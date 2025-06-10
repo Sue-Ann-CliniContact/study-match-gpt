@@ -74,7 +74,8 @@ def match_studies(participant, studies):
             if score < 0:
                 continue
 
-            url = study.get("url", "Not available")
+            nct_id = study.get("nct_id", "")
+            url = study.get("url") or (f"https://clinicaltrials.gov/ct2/show/{nct_id}" if nct_id else None)
             link = study.get("link", url)
             city = study.get("location", "Location N/A")
             title = study.get("title", "No Title")
