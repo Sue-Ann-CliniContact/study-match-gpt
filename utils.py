@@ -1,52 +1,72 @@
-
+import math
 from datetime import datetime
-from math import radians, sin, cos, sqrt, atan2
+from dateutil import parser
 
-def calculate_age(birth_date_str):
+def calculate_age(dob_str: str) -> int:
+    """
+    Given "July 4, 2013", returns integer age.
+    """
     try:
-        birth_date = datetime.strptime(birth_date_str, "%B %d, %Y")
-        today = datetime.today()
-        return today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
-    except Exception:
-        return None
+        dob = parser.parse(dob_str).date()
+        today = datetime.today().date()
+        years = today.year - dob.year
+        if (today.month, today.day) < (dob.month, dob.day):
+            years -= 1
+        return years
+    except:
+        return 0
 
-def haversine_distance_km(lat1, lon1, lat2, lon2):
-    # Radius of the Earth in km
-    R = 6371.0
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Returns distance in miles between two coords.
+    """
+    # Earth radius in miles
+    R = 3958.8
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
 
-    # Convert degrees to radians
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1 - a))
-
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-def format_matches_for_gpt(matches):
+def extract_participant_data(raw: dict) -> dict:
+    """
+    Normalize the raw JSON from the GPT extract stage into our participant dict.
+    Expect raw contains keys: dob, location, pediatric_only, diagnosis, verbal, etc.
+    """
+    return {
+        "age": raw.get("age", 0),
+        "location": raw.get("location_coords"),  # GPT needs to supply this
+        "pediatric_only": raw.get("study_age_focus","pediatric").lower().startswith("ped"),
+        "diagnosis": raw.get("diagnosis"),
+        "verbal": raw.get("verbal"),
+        "email": raw.get("email"),
+        "phone": raw.get("phone"),
+        "relation": raw.get("relation"),
+        "dob": raw.get("dob"),
+        # any other fields you need downstream
+    }
+
+def format_matches_for_gpt(matches: list) -> str:
+    """
+    Given the list from match_studies(), render a markdown/text reply with
+    grouped sections, match score, rationale, and all study details.
+    """
     if not matches:
-        return (
-            "Unfortunately, no studies matched based on your details. "
-            "Would you like us to follow up if new ones become available?"
-        )
+        return "Unfortunately, no studies matched based on your details."
 
-    output = "Here are some clinical studies that may be a fit:\n\n"
-    for idx, study in enumerate(matches, 1):
-        reasons = study.get('match_reason', [])
-        rationale = "; ".join(reasons) if reasons else 'No specific rationale provided.'
-
-        output += f"**{idx}. {study['title']}**\n"
-        output += f"- **Location**: {study['location']}, {study['state']}\n"
-        output += f"- **Study Link**: [View Study]({study['url']})\n"
-        output += f"- **Summary**: {study['summary']}\n"
-        output += (
-            f"- **Eligibility Overview**: {study['eligibility'] or 'Not provided'}\n"
+    text = "Here are some clinical studies that may be a fit:\n\n"
+    # You could group by score or distance here if desired
+    for i, m in enumerate(matches, 1):
+        text += (
+            f"**{i}. {m['title']}**\n"
+            f"- Location: {m['location']}\n"
+            f"- Link: [View Study]({m['url']})\n"
+            f"- Summary: {m['summary']}\n"
+            f"- Eligibility: {m['eligibility']}\n"
+            f"- Contact: {m['contact_name']} | {m['contact_email']} | {m['contact_phone']}\n"
+            f"- Match Score: {m['match_score']}/10\n"
+            f"- Match Rationale: {', '.join([r for r in m['match_reason'] if r])}\n\n"
         )
-        output += (
-            f"- **Contact**: {study['contact_name']} | {study['contact_email']} | {study['contact_phone']}\n"
-        )
-        output += f"- **Match Rationale**: {rationale}\n\n"
-
-    return output
+    return text.strip()

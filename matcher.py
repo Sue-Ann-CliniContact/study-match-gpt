@@ -1,130 +1,98 @@
+import re
+from geopy.distance import geodesic
 
-import math
-from utils import (
-    calculate_age,
-    haversine_distance,
-    normalize_text,
-    extract_zip_and_state
-)
+def is_autism_related(text: str) -> bool:
+    keywords = ["autism", "autistic", "asd", "spectrum disorder"]
+    tl = text.lower()
+    return any(k in tl for k in keywords)
 
-def match_studies(participant_data, studies):
-    matched_studies = []
-    participant_zip = participant_data.get("zip_code", "")
-    participant_state = participant_data.get("state", "")
-    participant_lat = participant_data.get("latitude")
-    participant_lon = participant_data.get("longitude")
-    participant_age = participant_data.get("age")
-    diagnosis = normalize_text(participant_data.get("diagnosis", ""))
-    verbal = participant_data.get("verbal", "").lower()
-    co_conditions = normalize_text(participant_data.get("co_conditions", ""))
-    mobility = participant_data.get("mobility", "").lower()
-    schooling = normalize_text(participant_data.get("schooling", ""))
-    pediatric_only = participant_data.get("pediatric_only", True)
+def compute_score(study: dict, user_loc: tuple) -> int:
+    score = 0
+    # Condition relevance
+    combined = (study.get("condition_summary", "") or "") + " " + (study.get("eligibility", "") or "")
+    if is_autism_related(combined):
+        score += 5
 
-    for study in studies:
-        age_match = False
-        condition_match = False
-        location_score = 0
-        summary = study.get("summary", "").lower()
-        eligibility = study.get("eligibility", "").lower()
-        inclusion = study.get("inclusion_criteria", "").lower()
-        exclusion = study.get("exclusion_criteria", "").lower()
-        location = study.get("location", "")
-        zip_match = participant_zip in location
-        state_match = participant_state in location
+    # Age match is already filtered in main
 
-        # Age filtering
-        min_age = study.get("min_age")
-        max_age = study.get("max_age")
-        if min_age is not None and max_age is not None:
-            age_match = min_age <= participant_age <= max_age
+    # Distance scoring
+    study_city = study.get("location", "")
+    study_coords = None
+    # Map known cities (you can expand this to a map or geocoder)
+    city = study_city.lower()
+    if "dallas" in city:
+        study_coords = (32.7767, -96.7970)
+    elif "boston" in city:
+        study_coords = (42.3601, -71.0589)
+    elif "bethesda" in city:
+        study_coords = (38.9847, -77.0947)
+    elif "new york" in city:
+        study_coords = (40.7128, -74.0060)
+    # ... else fallback omitted
 
-        # Pediatric preference filter
-        if pediatric_only and max_age is not None and max_age > 18:
-            continue  # Skip adult studies
+    dist = None
+    if user_loc and study_coords:
+        dist = geodesic(user_loc, study_coords).miles
 
-        # Diagnosis match
-        if "autism" in summary or "asd" in summary or "autism" in eligibility:
-            condition_match = True
-
-        # Score based on distance
-        study_lat = study.get("latitude")
-        study_lon = study.get("longitude")
-        distance = None
-        if participant_lat and participant_lon and study_lat and study_lon:
-            distance = haversine_distance(participant_lat, participant_lon, study_lat, study_lon)
-            if distance <= 50:
-                location_score = 10
-            elif distance <= 250:
-                location_score = 7
-            else:
-                location_score = 4
+    if dist is not None:
+        if dist <= 50:
+            score += 3
+        elif dist <= 300:
+            score += 2
         else:
-            if zip_match:
-                location_score = 10
-            elif state_match:
-                location_score = 7
-            else:
-                location_score = 4
+            score += 1
 
-        score = 0
-        if condition_match:
-            score += 10
-        if age_match:
-            score += 10
-        score += location_score
+    return score
 
+def match_studies(participant: dict, studies: list) -> list:
+    """
+    Returns a list of up to 10 match dicts:
+    {
+      title, location, url, summary, eligibility, contact_name,
+      contact_email, contact_phone, match_score, match_reason
+    }
+    """
+    user_loc = participant.get("location")  # tuple (lat, lon)
+    user_age = participant.get("age", 0)
+    pediatric_only = participant.get("pediatric_only", True)
+
+    matches = []
+    for s in studies:
+        # Age filter
+        try:
+            min_a = int(re.findall(r"\\d+", s.get("min_age", "0"))[0])
+            max_a = int(re.findall(r"\\d+", s.get("max_age", "120"))[0])
+        except:
+            min_a, max_a = 0, 120
+        if pediatric_only and max_a > 18:
+            continue
+        if not (min_a <= user_age <= max_a):
+            continue
+
+        # Compute score
+        sc = compute_score(s, user_loc)
+        if sc <= 0:
+            continue
+
+        # Build match
         match = {
-            "name": study.get("name"),
-            "location": study.get("location"),
-            "link": study.get("link"),
-            "summary": study.get("summary"),
-            "eligibility": study.get("eligibility"),
-            "contact": study.get("contact"),
-            "distance": distance,
-            "score": score
+            "title": s.get("title") or s.get("brief_title") or "No Title",
+            "location": f"{s.get('location')}, {s.get('state')}",
+            "url": s.get("url") or f"https://clinicaltrials.gov/ct2/show/{s.get('nct_id','')}",
+            "summary": s.get("brief_summary") or s.get("description","No summary"),
+            "eligibility": s.get("eligibility","Not provided"),
+            "contact_name": s.get("contact_name","Not available"),
+            "contact_email": s.get("contact_email","Not available"),
+            "contact_phone": s.get("contact_phone","Not available"),
+            "match_score": sc,
+            "match_reason": [
+                "Autism relevance" if is_autism_related((s.get("condition_summary","")+" "+s.get("eligibility","")).lower()) else "",
+                f"Within age range {min_a}-{max_a}",
+                f"Distance score: {sc-5-3 if sc>8 else sc-5}"  # simplistic rationale
+            ]
         }
-        matched_studies.append(match)
+        matches.append(match)
 
-    matched_studies.sort(key=lambda x: x["score"], reverse=True)
-
-    near_you = []
-    national = []
-    other = []
-
-    for study in matched_studies:
-        dist = study["distance"]
-        if dist is not None:
-            if dist <= 50:
-                near_you.append(study)
-            elif dist <= 250:
-                national.append(study)
-            else:
-                other.append(study)
-        else:
-            other.append(study)
-
-    grouped_output = "Here are some clinical studies that may be a fit:\n\n"
-
-    def format_group(title, group):
-        section = f"**{title}**\n\n"
-        for idx, study in enumerate(group, 1):
-            section += (
-                f"{idx}. {study['name']}\n"
-                f"- Location: {study['location']}\n"
-                f"- Study Link: {study['link']}\n"
-                f"- Summary: {study['summary']}\n"
-                f"- Eligibility Overview: {study['eligibility']}\n"
-                f"- Contact: {study['contact']}\n"
-                f"- Match Confidence Score: {study['score']}/30\n\n"
-            )
-        return section
-
-    if near_you:
-        grouped_output += format_group("🔵 Near You (≤50 miles)", near_you)
-    if national:
-        grouped_output += format_group("🟢 National (≤250 miles)", national)
-    if other:
-        grouped_output += format_group("⚪ Other (Unspecified/International)", other)
-
-    return grouped_output.strip()
+    # Sort by score desc
+    matches.sort(key=lambda x: x["match_score"], reverse=True)
+    return matches[:10]
