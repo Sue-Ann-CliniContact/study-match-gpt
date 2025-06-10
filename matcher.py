@@ -56,7 +56,7 @@ def match_studies(participant, studies):
                 "state": study.get("state", ""),
                 "country": study.get("country", ""),
                 "status": study.get("status", ""),
-                "link": link,
+                "url": link,
                 "contact_name": study.get("contact_name", "Not available"),
                 "contact_email": study.get("contact_email", "Not available"),
                 "contact_phone": study.get("contact_phone", "Not available"),
