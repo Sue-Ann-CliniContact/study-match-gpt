@@ -1,98 +1,83 @@
-import json
-from geopy.distance import geodesic
+
+from utils import calculate_distance, format_study
 import math
 
-# Load the indexed studies once
-with open("indexed_studies.json", "r", encoding="utf-8") as f:
-    studies = json.load(f)
+def match_studies(participant, studies):
+    matched_studies = []
+    user_age = participant.get("age")
+    user_lat = participant.get("latitude")
+    user_lon = participant.get("longitude")
+    max_distance_km = 1000
 
-def calculate_distance(user_coords, study_location):
-    try:
-        return geodesic(user_coords, study_location).miles
-    except:
-        return None
-
-def assess_match_score(study, data):
-    score = 0
-    reasons = []
-
-    # Age match
-    age = data.get("age")
-    age_ok = study.get("eligibility", {}).get("min_age", 0) <= age <= study.get("eligibility", {}).get("max_age", 150)
-    if age_ok:
-        score += 3
-        reasons.append("Age eligibility matched")
-    else:
-        reasons.append("Age not within range")
-
-    # Diagnosis match
-    diagnosis_keywords = ["autism", "asd", "autism spectrum"]
-    if any(word in study.get("summary", "").lower() for word in diagnosis_keywords):
-        score += 3
-        reasons.append("Diagnosis criteria matched")
-
-    # Location match
-    user_location = data.get("location_coords")
-    study_location = study.get("location_coords")
-    if user_location and study_location:
-        distance = calculate_distance(user_location, study_location)
-        if distance is not None:
-            if distance < 50:
-                score += 3
-                reasons.append("Study is nearby (<50 miles)")
-            elif distance < 300:
-                score += 2
-                reasons.append("Study is within 300 miles")
-            else:
-                reasons.append("Study is distant (>300 miles)")
-        else:
-            reasons.append("Unable to calculate distance")
-    else:
-        reasons.append("Location not provided")
-
-    return score, reasons
-
-def match_studies(data):
-    if not isinstance(data, dict):
-        raise ValueError("Participant data must be a dictionary.")
-
-    matches = []
     for study in studies:
-        score, reasons = assess_match_score(study, data)
-        matches.append({
-            "name": study.get("title", "N/A"),
-            "location": study.get("location", "Unknown"),
-            "link": study.get("url"),
-            "summary": study.get("summary", "No summary provided."),
-            "eligibility": study.get("eligibility_text", "Not available."),
-            "contact": study.get("contact", "Not listed"),
-            "match_rationale": ", ".join(reasons),
-            "match_score": round(score / 9 * 10, 1)
-        })
+        age_range = study.get("age_range", {})
+        min_age = age_range.get("min", 0)
+        max_age = age_range.get("max", 120)
+        condition = study.get("condition", "").lower()
 
-    matches.sort(key=lambda x: -x["match_score"])
+        if not (min_age <= user_age <= max_age):
+            continue
 
-    # Grouped text output
+        if "autism" not in condition:
+            continue
+
+        distance_km = None
+        location = study.get("location")
+        if location and user_lat is not None and user_lon is not None:
+            study_lat = location.get("latitude")
+            study_lon = location.get("longitude")
+            if study_lat is not None and study_lon is not None:
+                distance_km = calculate_distance(user_lat, user_lon, study_lat, study_lon)
+                if distance_km > max_distance_km:
+                    continue
+
+        match_score = 8.0
+        if distance_km is not None:
+            if distance_km < 100:
+                match_score += 1.5
+            elif distance_km < 500:
+                match_score += 0.5
+
+        study["match_score"] = round(min(match_score, 10), 1)
+        study["distance_km"] = distance_km
+        matched_studies.append(study)
+
+    matched_studies.sort(key=lambda s: s.get("match_score", 0), reverse=True)
+
+    near_you = []
+    national = []
+    far_away = []
+
+    for study in matched_studies:
+        dist = study.get("distance_km")
+        if dist is None:
+            national.append(study)
+        elif dist < 100:
+            near_you.append(study)
+        elif dist < 1000:
+            national.append(study)
+        else:
+            far_away.append(study)
+
+    def render_group(group_name, studies):
+        if not studies:
+            return ""
+        section = f"
+{group_name}:
+"
+        for i, s in enumerate(studies, 1):
+            formatted = format_study(s)
+            score = s.get("match_score", "N/A")
+            section += f"{i}. {formatted}
+Match Score: {score}/10
+
+"
+        return section
+
     grouped_output = "Here are some clinical studies that may be a fit:
 "
-    for match in matches[:10]:
-        grouped_output += (
-            f"
-📍 {match['name']}
-"
-            f"- Location: {match['location']}
-"
-            f"- Study Link: {match['link']}
-"
-            f"- Summary: {match['summary']}
-"
-            f"- Eligibility Overview: {match['eligibility']}
-"
-            f"- Contact: {match['contact']}
-"
-            f"- Match Score: {match['match_score']}/10
-"
-            f"- Match Rationale: {match['match_rationale']}
-"
-        )
-    return grouped_output
+    grouped_output += render_group("🔵 Near You", near_you)
+    grouped_output += render_group("🟢 National", national)
+    grouped_output += render_group("⚪ Far Away", far_away)
+
+    return grouped_output.strip()
