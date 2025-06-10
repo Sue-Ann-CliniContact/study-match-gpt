@@ -116,7 +116,10 @@ async def chat_handler(request: Request):
             if not matches:
                 return {"reply": match_summary}
 
-            chat_histories[session_id].append({"role": "user", "content": match_summary})
+            chat_histories[session_id].append({
+                "role": "user",
+                "content": "Here are some matched studies for a participant. Please summarize and ask if they want help with next steps:\n\n" + match_summary
+            })
             followup_response = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=chat_histories[session_id],
