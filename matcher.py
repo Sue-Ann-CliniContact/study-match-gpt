@@ -1,4 +1,3 @@
-
 import re
 from geopy.distance import geodesic
 
@@ -21,6 +20,7 @@ def compute_score(study, participant_coords):
     study_coords = (0, 0)
 
     if study_country != "United States":
+        print(f"Skipping international study: {study.get('title')}")
         return -1  # filter out non-US by default
 
     if "dallas" in study_city.lower():
@@ -46,64 +46,83 @@ def compute_score(study, participant_coords):
 
 def match_studies(participant, studies):
     matched_studies = []
-    participant_coords = (32.7767, -96.7970)  # assume Dallas TX
+    participant_coords = (32.7767, -96.7970)  # hardcoded Dallas for now
 
     for study in studies:
         try:
             if not isinstance(study, dict):
                 continue
 
+            # Autism relevance check
             combined_text = (study.get("condition_summary", "") or "") + " " + (study.get("eligibility", "") or "")
             if not is_autism_related(combined_text):
+                print(f"Skipping non-autism study: {study.get('title')}")
                 continue
 
-            min_age = study.get("min_age", "N/A")
-            max_age = study.get("max_age", "N/A")
+            # Parse age limits
+            min_age = study.get("min_age", "0")
+            max_age = study.get("max_age", "120")
             try:
-                min_age_val = int(re.findall(r"\d+", min_age)[0]) if min_age != "N/A" else 0
-                max_age_val = int(re.findall(r"\d+", max_age)[0]) if max_age != "N/A" else 120
-            except:
+                min_age_val = int(re.findall(r"\d+", min_age)[0]) if re.findall(r"\d+", min_age) else 0
+                max_age_val = int(re.findall(r"\d+", max_age)[0]) if re.findall(r"\d+", max_age) else 120
+            except Exception as e:
+                print(f"Age parse failed for study: {study.get('title')} - {e}")
                 min_age_val = 0
                 max_age_val = 120
 
-            age = participant.get("age", 0)
-            if not (min_age_val <= age <= max_age_val):
+            # Participant age (must be a valid number)
+            age = participant.get("age")
+            if not isinstance(age, int):
+                try:
+                    age = int(age)
+                except:
+                    print(f"Invalid participant age: {age}. Defaulting to 0.")
+                    age = 0
+
+            if age is None or min_age_val is None or max_age_val is None:
+                print(f"Skipping study due to invalid age comparison: {study.get('title')}")
                 continue
 
+            if not (min_age_val <= age <= max_age_val):
+                print(f"Skipping due to age mismatch: {study.get('title')} (Allowed: {min_age_val}-{max_age_val}, Participant: {age})")
+                continue
+
+            # Score the match
             score = compute_score(study, participant_coords)
             if score < 0:
                 continue
 
+            # Build match object
             nct_id = study.get("nct_id", "")
             url = study.get("url") or (f"https://clinicaltrials.gov/ct2/show/{nct_id}" if nct_id else None)
             link = study.get("link", url)
             city = study.get("location", "Location N/A")
             title = study.get("title", "No Title")
-            summary = f"{title} in {city}, recruiting ages {min_age} to {max_age}."
 
             match = {
-                "nct_id": study.get("nct_id", ""),
-                "title": study.get("title", ""),
+                "nct_id": nct_id,
+                "title": title,
                 "description": study.get("description", ""),
                 "eligibility": study.get("eligibility", ""),
                 "min_age": min_age,
                 "max_age": max_age,
-                "location": study.get("location", ""),
+                "location": city,
                 "state": study.get("state", ""),
                 "country": study.get("country", ""),
                 "status": study.get("status", ""),
                 "link": link,
-                "url": url,  # <-- Add this line to ensure 'url' is always present
+                "url": url,
                 "contact_name": study.get("contact_name", "Not available"),
                 "contact_email": study.get("contact_email", "Not available"),
                 "contact_phone": study.get("contact_phone", "Not available"),
-                "match_score": study.get("match_score", 0),
-                "summary": study.get("summary", ""),
+                "match_score": score,
+                "summary": f"{title} in {city}, recruiting ages {min_age} to {max_age}."
             }
+
             matched_studies.append(match)
+
         except Exception as e:
-            print(f"Error processing study: {e}")
+            print(f"Unhandled error processing study: {e}")
             continue
 
-    # Return top 10 matches sorted by score
     return sorted(matched_studies, key=lambda x: x["match_score"], reverse=True)[:10]
