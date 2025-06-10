@@ -1,6 +1,5 @@
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Request
-from pydantic import BaseModel
 import openai
 import os
 import json
@@ -15,7 +14,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or ["https://www.clinicontact.com"] for production
+    allow_origins=["*"],  # tighten to your domain in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -87,57 +86,39 @@ async def chat_handler(request: Request):
 
     chat_histories[session_id].append({"role": "user", "content": user_input})
 
+    # First call: collect participant info
     response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=chat_histories[session_id],
         temperature=0.5
     )
-
     gpt_message = response.choices[0].message["content"]
     chat_histories[session_id].append({"role": "assistant", "content": gpt_message})
 
+    # If GPT returned the participant dict, process studies
     match = re.search(r'{[\s\S]*}', gpt_message)
     if match:
         try:
             participant_data = json.loads(match.group())
-            print("Extracted participant data:", participant_data)
-
-            # Add age from DOB
+            # Calculate age
             participant_data["age"] = calculate_age(participant_data.get("dob", ""))
 
             # Push to Monday.com
             push_to_monday(participant_data)
 
-            # Match studies
-            print("Opening indexed_studies.json...")
+            # Load studies and match
             with open("indexed_studies.json", "r") as f:
                 all_studies = json.load(f)
-            print("Loaded studies:", len(all_studies))
-
             matches = match_studies(participant_data, all_studies)
-            print("Found matches:", matches)
 
-            # Format and return
+            # **Directly format and return** the study summaries
             match_summary = format_matches_for_gpt(matches)
-            print("Match summary to GPT:", match_summary)
+            return {"reply": match_summary}
 
-            if not matches:
-                return {"reply": match_summary}
-
-            chat_histories[session_id].append({
-                "role": "user",
-                "content": "Here are some matched studies for a participant. Please summarize and ask if they want help with next steps:\n\n" + match_summary
-            })
-            followup_response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=chat_histories[session_id],
-                temperature=0.5
-            )
-            final_reply = followup_response.choices[0].message["content"]
-            return {"reply": final_reply}
         except Exception as e:
             return {"reply": "We encountered an error processing your info.", "error": str(e)}
 
+    # Otherwise, just echo GPT’s current message
     return {"reply": gpt_message}
 
 if __name__ == "__main__":
