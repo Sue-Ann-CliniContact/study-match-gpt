@@ -21,19 +21,32 @@ def match_studies(participant_data, all_studies):
         max_age = study.get("max_age")
         condition = study.get("condition", "").lower()
 
+        print("\n---")
+        print("Evaluating study:", title)
+        print("Condition:", condition)
+        print("Eligibility:", eligibility)
+        print("Cities:", cities)
+        print("Zipcodes:", zipcodes)
+        print("Min age:", min_age, "Max age:", max_age)
+
         # Basic filters
         if "autism" not in condition and "autism" not in eligibility:
+            print("❌ Skipped: 'autism' not in condition or eligibility")
             continue
 
         if study_focus == "pediatric" and max_age and max_age > 18:
+            print("❌ Skipped: Study not pediatric")
             continue
         if study_focus == "adult" and min_age and min_age < 18:
+            print("❌ Skipped: Study not adult")
             continue
 
         if age is not None:
             if min_age and age < min_age:
+                print(f"❌ Skipped: Age {age} < min_age {min_age}")
                 continue
             if max_age and age > max_age:
+                print(f"❌ Skipped: Age {age} > max_age {max_age}")
                 continue
 
         # Location check
@@ -48,8 +61,10 @@ def match_studies(participant_data, all_studies):
                     found = True
                     break
             if not found:
+                print("❌ Skipped: No matching location")
                 continue
 
+        print("✅ MATCH")
         matches.append(study)
 
     return matches
