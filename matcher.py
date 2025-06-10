@@ -7,6 +7,8 @@ def match_studies(participant_data, all_studies):
     diagnosis = participant_data.get("diagnosis", "").lower()
     study_focus = participant_data.get("study_age_focus", "").lower()
 
+    autism_keywords = ["autism", "asd", "autism spectrum", "autism spectrum disorder", "autistic"]
+
     try:
         age = int(age)
     except:
@@ -29,9 +31,9 @@ def match_studies(participant_data, all_studies):
         print("Zipcodes:", zipcodes)
         print("Min age:", min_age, "Max age:", max_age)
 
-        # Basic filters
-        if "autism" not in condition and "autism" not in eligibility:
-            print("❌ Skipped: 'autism' not in condition or eligibility")
+        # ✅ Fix: Check for any autism keyword
+        if not any(keyword in condition or keyword in eligibility for keyword in autism_keywords):
+            print("❌ Skipped: No autism keyword found")
             continue
 
         if study_focus == "pediatric" and max_age and max_age > 18:
