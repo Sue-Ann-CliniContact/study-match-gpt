@@ -14,7 +14,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or your domain in production
+    allow_origins=["*"],  # tighten in production to your domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -25,7 +25,7 @@ SYSTEM_PROMPT = """You are a clinical trial assistant named Hey Trial. Your job 
 - Email Address
 - Phone Number
 - Are you the person with autism, or are you filling this out on their behalf?
-- Date of birth
+- Date of birth of the person with autism (please use formats like “January 19, 2020” or “19 Jan 2020”)
 - City, State and Zipcode
 - Can you receive text messages about studies?
 - Has the individual been officially diagnosed with Autism Spectrum Disorder (ASD)?
@@ -68,12 +68,26 @@ Say nothing else in that message. Do not match studies or explain yet."""
 chat_histories = {}
 
 def calculate_age(dob_str):
-    try:
-        dob = datetime.strptime(dob_str, "%B %d, %Y")
-        today = datetime.today()
-        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-    except:
-        return None
+    """
+    Attempt to parse multiple common date formats and compute age in years.
+    """
+    dob = None
+    # Try full month name, e.g. "January 19, 2020"
+    for fmt in ("%B %d, %Y", "%d %B %Y", "%d %b %Y"):
+        try:
+            dob = datetime.strptime(dob_str, fmt)
+            break
+        except:
+            continue
+    if not dob:
+        # As a last resort, try ISO-like parse (YYYY-MM-DD)
+        try:
+            dob = datetime.fromisoformat(dob_str)
+        except:
+            return None
+    today = datetime.today()
+    # Age in years, accounting for month/day
+    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 @app.post("/chat")
 async def chat_handler(request: Request):
@@ -100,7 +114,7 @@ async def chat_handler(request: Request):
     if match:
         try:
             participant_data = json.loads(match.group())
-            # Calculate age from the collected DOB (now correctly referring to the child)
+            # Calculate age from the collected DOB
             participant_data["age"] = calculate_age(participant_data.get("dob", ""))
 
             # Push to Monday.com
@@ -111,7 +125,7 @@ async def chat_handler(request: Request):
                 all_studies = json.load(f)
             matches = match_studies(participant_data, all_studies)
 
-            # Directly format & return the study summaries
+            # Format & return the study summaries
             match_summary = format_matches_for_gpt(matches)
             return {"reply": match_summary}
 
