@@ -74,28 +74,30 @@ def match_studies(participant, studies):
             if score < 0:
                 continue
 
-            link = study.get("link") or study.get("url") or "Not available"
+            url = study.get("url", "Not available")
+            link = study.get("link", url)
             city = study.get("location", "Location N/A")
             title = study.get("title", "No Title")
             summary = f"{title} in {city}, recruiting ages {min_age} to {max_age}."
 
             match = {
                 "nct_id": study.get("nct_id", ""),
-                "title": title,
+                "title": study.get("title", ""),
                 "description": study.get("description", ""),
                 "eligibility": study.get("eligibility", ""),
                 "min_age": min_age,
                 "max_age": max_age,
-                "location": city,
+                "location": study.get("location", ""),
                 "state": study.get("state", ""),
                 "country": study.get("country", ""),
                 "status": study.get("status", ""),
                 "link": link,
+                "url": url,  # <-- Add this line to ensure 'url' is always present
                 "contact_name": study.get("contact_name", "Not available"),
                 "contact_email": study.get("contact_email", "Not available"),
                 "contact_phone": study.get("contact_phone", "Not available"),
-                "match_score": score,
-                "summary": summary
+                "match_score": study.get("match_score", 0),
+                "summary": study.get("summary", ""),
             }
             matched_studies.append(match)
         except Exception as e:
