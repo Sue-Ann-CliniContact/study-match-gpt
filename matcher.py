@@ -8,18 +8,16 @@ def is_autism_related(text):
 
 def compute_score(study, participant_coords):
     score = 0
-    # Boost for condition/eligibility keywords
     condition = study.get("condition_summary", "").lower()
     eligibility = study.get("eligibility", "").lower()
     keywords = ["autism", "asd", "autistic", "spectrum disorder"]
     if any(k in f"{condition} {eligibility}" for k in keywords):
         score += 5
 
-    # Location-based scoring
     study_city = study.get("location", "")
     study_country = study.get("country", "")
     if study_country != "United States":
-        return -1  # exclude non-US studies
+        return -1
     if "dallas" in study_city.lower():
         coords = (32.7767, -96.7970)
     elif "boston" in study_city.lower():
@@ -42,7 +40,6 @@ def compute_score(study, participant_coords):
 
 def match_studies(participant, studies):
     matched_studies = []
-    # Default participant coords (Dallas)
     participant_coords = (32.7767, -96.7970)
     try:
         age = int(participant.get("age", 0))
@@ -54,12 +51,10 @@ def match_studies(participant, studies):
             if not isinstance(study, dict):
                 continue
 
-            # 1. Autism relevance check
-            text = (study.get("condition_summary", "") or "") + " " + (study.get("eligibility", "") or "")
-            if not is_autism_related(text):
+            combined = (study.get("condition_summary", "") or "") + " " + (study.get("eligibility", "") or "")
+            if not is_autism_related(combined):
                 continue
 
-            # 2. Age eligibility
             min_raw = study.get("min_age", "N/A")
             max_raw = study.get("max_age", "N/A")
             try:
@@ -70,7 +65,6 @@ def match_studies(participant, studies):
             if not (min_val <= age <= max_val):
                 continue
 
-            # 3. Compute score and build rationale
             score = compute_score(study, participant_coords)
             if score < 0:
                 continue
@@ -84,7 +78,6 @@ def match_studies(participant, studies):
             else:
                 rationale.append("Possible match based on condition relevance")
 
-            # 4. Build match dictionary with full fields
             nct = study.get("nct_id", "")
             url = study.get("url") or (f"https://clinicaltrials.gov/ct2/show/{nct}" if nct else None)
             city = study.get("location", "N/A")
@@ -115,5 +108,4 @@ def match_studies(participant, studies):
         except:
             continue
 
-    # Return top 10 matches by score
     return sorted(matched_studies, key=lambda x: x["match_score"], reverse=True)[:10]
