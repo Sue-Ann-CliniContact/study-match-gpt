@@ -1,3 +1,4 @@
+# matcher.py (updated)
 import re
 from geopy.distance import geodesic
 
@@ -15,14 +16,12 @@ def compute_score(study, participant_coords):
         score += 5
 
     study_city = study.get("location", "")
-    study_state = study.get("state", "")
     study_country = study.get("country", "")
-    study_coords = (0, 0)
-
+    # filter out non-US
     if study_country != "United States":
-        print(f"Skipping international study: {study.get('title')}")
-        return -1  # filter out non-US by default
+        return -1
 
+    # determine study coordinates
     if "dallas" in study_city.lower():
         study_coords = (32.7767, -96.7970)
     elif "boston" in study_city.lower():
@@ -32,7 +31,7 @@ def compute_score(study, participant_coords):
     elif "new york" in study_city.lower():
         study_coords = (40.7128, -74.0060)
     else:
-        study_coords = (38.0, -97.0)  # default fallback
+        study_coords = (38.0, -97.0)
 
     distance = geodesic(participant_coords, study_coords).miles
     if distance <= 25:
@@ -46,66 +45,64 @@ def compute_score(study, participant_coords):
 
 def match_studies(participant, studies):
     matched_studies = []
-    participant_coords = (32.7767, -96.7970)  # hardcoded Dallas for now
+    participant_coords = (32.7767, -96.7970)  # Dallas fallback
+    age = participant.get("age", 0)
+    try:
+        age = int(age)
+    except:
+        age = 0
 
     for study in studies:
         try:
             if not isinstance(study, dict):
                 continue
 
-            # Autism relevance check
+            # autism relevance
             combined_text = (study.get("condition_summary", "") or "") + " " + (study.get("eligibility", "") or "")
             if not is_autism_related(combined_text):
-                print(f"Skipping non-autism study: {study.get('title')}")
                 continue
 
-            # Parse age limits
-            min_age = study.get("min_age", "0")
-            max_age = study.get("max_age", "120")
+            # parse age bounds
+            min_age_raw = study.get("min_age", "N/A")
+            max_age_raw = study.get("max_age", "N/A")
             try:
-                min_age_val = int(re.findall(r"\d+", min_age)[0]) if re.findall(r"\d+", min_age) else 0
-                max_age_val = int(re.findall(r"\d+", max_age)[0]) if re.findall(r"\d+", max_age) else 120
-            except Exception as e:
-                print(f"Age parse failed for study: {study.get('title')} - {e}")
-                min_age_val = 0
-                max_age_val = 120
-
-            # Participant age (must be a valid number)
-            age = participant.get("age")
-            if not isinstance(age, int):
-                try:
-                    age = int(age)
-                except:
-                    print(f"Invalid participant age: {age}. Defaulting to 0.")
-                    age = 0
-
-            if age is None or min_age_val is None or max_age_val is None:
-                print(f"Skipping study due to invalid age comparison: {study.get('title')}")
-                continue
+                min_age_val = int(re.findall(r"\d+", min_age_raw)[0]) if re.findall(r"\d+", min_age_raw) else 0
+                max_age_val = int(re.findall(r"\d+", max_age_raw)[0]) if re.findall(r"\d+", max_age_raw) else 120
+            except:
+                min_age_val, max_age_val = 0, 120
 
             if not (min_age_val <= age <= max_age_val):
-                print(f"Skipping due to age mismatch: {study.get('title')} (Allowed: {min_age_val}-{max_age_val}, Participant: {age})")
                 continue
 
-            # Score the match
+            # compute score and rationale
             score = compute_score(study, participant_coords)
             if score < 0:
                 continue
+            rationale = []
+            if score >= 8:
+                rationale.append("Very strong match based on condition, location, and age")
+            elif score >= 6:
+                rationale.append("Strong match based on condition and location")
+            elif score >= 3:
+                rationale.append("Moderate match based on condition or proximity")
+            else:
+                rationale.append("Possible match based on condition relevance")
 
-            # Build match object
+            # build match object
             nct_id = study.get("nct_id", "")
             url = study.get("url") or (f"https://clinicaltrials.gov/ct2/show/{nct_id}" if nct_id else None)
             link = study.get("link", url)
             city = study.get("location", "Location N/A")
             title = study.get("title", "No Title")
+            summary = study.get("summary") or f"{title} in {city}, recruiting ages {min_age_raw} to {max_age_raw}."
 
             match = {
                 "nct_id": nct_id,
                 "title": title,
                 "description": study.get("description", ""),
                 "eligibility": study.get("eligibility", ""),
-                "min_age": min_age,
-                "max_age": max_age,
+                "min_age": min_age_raw,
+                "max_age": max_age_raw,
                 "location": city,
                 "state": study.get("state", ""),
                 "country": study.get("country", ""),
@@ -116,13 +113,11 @@ def match_studies(participant, studies):
                 "contact_email": study.get("contact_email", "Not available"),
                 "contact_phone": study.get("contact_phone", "Not available"),
                 "match_score": score,
-                "summary": f"{title} in {city}, recruiting ages {min_age} to {max_age}."
+                "summary": summary,
+                "match_reason": rationale,
             }
-
             matched_studies.append(match)
-
-        except Exception as e:
-            print(f"Unhandled error processing study: {e}")
+        except Exception:
             continue
 
     return sorted(matched_studies, key=lambda x: x["match_score"], reverse=True)[:10]
