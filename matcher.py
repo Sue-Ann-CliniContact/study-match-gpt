@@ -71,6 +71,7 @@ def match_studies(participant, studies):
     user_age = participant.get("age")
     user_loc = participant.get("location")
     if user_age is None:
+        print("⚠️ User age missing — aborting match.")
         return []
 
     results = []
@@ -79,11 +80,9 @@ def match_studies(participant, studies):
         if s.get("recruitment_status", "").lower() != "recruiting":
             continue
 
-        # Try direct values
         min_a = s.get("min_age_years")
         max_a = s.get("max_age_years")
 
-        # Try fallback parsing from eligibility text
         if min_a is None or max_a is None:
             parsed_min, parsed_max = extract_age_from_text(s.get("eligibility_text", ""))
             if min_a is None:
@@ -91,15 +90,12 @@ def match_studies(participant, studies):
             if max_a is None:
                 max_a = parsed_max
 
-        # HARD FAIL if still None
-        if min_a is None or max_a is None:
+        # Final check to ensure numeric bounds
+        if not isinstance(min_a, int) or not isinstance(max_a, int):
+            print(f"⚠️ Skipping study due to invalid age bounds: min={min_a}, max={max_a}")
             continue
 
-        try:
-            if not (min_a <= user_age <= max_a):
-                continue
-        except TypeError as e:
-            print("⚠️ TypeError comparing age:", e, "→", f"min_a={min_a}, max_a={max_a}, user_age={user_age}")
+        if not (min_a <= user_age <= max_a):
             continue
 
         score, group = compute_score_and_group(s, user_loc, user_age)
@@ -135,4 +131,3 @@ def match_studies(participant, studies):
 
     results.sort(key=lambda x: x["match_confidence"], reverse=True)
     return results[:10]
-
