@@ -1,36 +1,38 @@
+def calculate_proximity_score(participant_location, study_location):
+    # Placeholder proximity score logic
+    if participant_location and study_location:
+        if participant_location.lower() in study_location.lower():
+            return 10  # Exact city match
+        elif participant_location.split(',')[-1].strip().lower() in study_location.lower():
+            return 7  # State match
+    return 4  # Distant
 
-def format_matches_for_gpt(matches: list) -> str:
-    if not matches:
-        return "Unfortunately, no studies matched based on your details."
+def is_eligible(participant, study):
+    age = participant.get("age")
+    min_age = study.get("min_age_years")
+    max_age = study.get("max_age_years")
 
-    grouped = {"Near You": [], "National": [], "Other": []}
-    for m in matches:
-        group = m.get("group", "Other")
-        grouped.setdefault(group, []).append(m)
+    # ✅ Prevent TypeError from None values
+    if age is not None:
+        if min_age is not None and age < min_age:
+            return False
+        if max_age is not None and age > max_age:
+            return False
 
-    out = "Here are some clinical studies that may be a fit:\n\n"
+    return True
 
-    for group_label in ["Near You", "National", "Other"]:
-        group_matches = grouped.get(group_label, [])
-        if not group_matches:
-            continue
-        out += f"### {group_label} Studies\n\n"
-        for i, m in enumerate(group_matches, 1):
-            rationale = ", ".join(r for r in m.get("match_reason", []) if r)
-            summary = m.get("summary", "").strip().replace("\n", " ").split(". ")
-            short_summary = ". ".join(summary[:2]) + ("." if not summary[0].endswith('.') else "")
-            eligibility_raw = m.get("eligibility", "").splitlines()
-            eligibility = "\n".join(f"- {line.strip('- ')}" for line in eligibility_raw if line.strip())
-            contact_info = " | ".join(filter(None, [m.get("contact_name"), m.get("contact_email"), m.get("contact_phone")]))
+def format_phone_number(number):
+    if not number:
+        return ""
+    cleaned = ''.join(filter(str.isdigit, number))
+    if cleaned.startswith("1") and len(cleaned) == 11:
+        return f"+{cleaned}"
+    elif len(cleaned) == 10:
+        return f"+1{cleaned}"
+    return f"+{cleaned}" if cleaned else ""
 
-            out += (
-                f"**{i}. {m['title']}**\n"
-                f"**Location:** {m['location']}\n"
-                f"**Link:** [View Study]({m['url']})\n"
-                f"**Summary:** {short_summary}\n"
-                f"**Eligibility:**\n{eligibility}\n"
-                f"**Contact:** {contact_info}\n"
-                f"**Match Confidence:** {m['match_score']}/10\n"
-                f"**Match Rationale:** {rationale}\n\n"
-            )
-    return out.strip()
+def format_email(email):
+    return email.strip() if email else ""
+
+def normalize_string(text):
+    return text.lower().strip() if isinstance(text, str) else ""

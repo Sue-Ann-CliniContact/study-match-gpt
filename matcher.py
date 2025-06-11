@@ -1,4 +1,3 @@
-
 import re
 from geopy.distance import geodesic
 
@@ -26,22 +25,28 @@ def compute_score_and_group(study: dict, user_loc: tuple) -> tuple:
             score += 2
             group = "National"
     else:
-        score += 1
+        score += 1  # Reward for having some info even if coords missing
 
     return score, group
 
+def safe_parse_age(value, fallback):
+    try:
+        return int(re.findall(r"\d+", str(value))[0])
+    except:
+        return fallback
+
 def match_studies(participant: dict, studies: list) -> list:
     user_loc = participant.get("location")
-    user_age = participant.get("age", 0)
+    user_age = participant.get("age")
+    if user_age is None:
+        return []
+
     pediatric_only = participant.get("study_age_focus", "pediatric").lower().startswith("ped")
 
     results = []
     for s in studies:
-        try:
-            min_a = int(re.findall(r"\d+", s.get("min_age", "0"))[0])
-            max_a = int(re.findall(r"\d+", s.get("max_age", "120"))[0])
-        except:
-            min_a, max_a = 0, 120
+        min_a = safe_parse_age(s.get("min_age"), 0)
+        max_a = safe_parse_age(s.get("max_age"), 120)
 
         if pediatric_only and max_a > 18:
             continue
