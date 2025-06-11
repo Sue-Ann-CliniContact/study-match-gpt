@@ -1,96 +1,79 @@
-import math
+import re
+from utils import (
+    is_autism_related,
+    extract_age_range,
+    extract_locations,
+    is_within_distance,
+    extract_participation_criteria,
+    extract_comorbid_keywords,
+    supports_remote_participation
+)
 
-def haversine_distance(lat1, lon1, lat2, lon2):
-    R = 3958.8  # Radius of Earth in miles
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    d_phi = math.radians(lat2 - lat1)
-    d_lambda = math.radians(lon2 - lon1)
-
-    a = math.sin(d_phi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(d_lambda/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    return R * c
-
-def is_age_eligible(age, min_age, max_age):
-    if age is None:
-        return False
-    if min_age is not None and age < min_age:
-        return False
-    if max_age is not None and age > max_age:
-        return False
-    return True
-
-def score_match(study, participant_data):
-    score = 0
-    rationale = []
-
-    # Location proximity
-    participant_city = participant_data.get("location", "").lower()
-    study_location = study.get("location", "").lower()
-    if participant_city and study_location:
-        if participant_city.split(",")[0] in study_location:
-            score += 3
-            rationale.append("Same city match")
-        elif "united states" in study_location or "usa" in study_location or "us" in study_location:
-            score += 2
-            rationale.append("National match")
-        else:
-            rationale.append("International or unknown location")
-
-    # Age eligibility scoring
-    age = participant_data.get("age")
-    min_age = study.get("min_age")
-    max_age = study.get("max_age")
-
-    if is_age_eligible(age, min_age, max_age):
-        score += 2
-        rationale.append(f"Age range {min_age if min_age is not None else '?'}-{max_age if max_age is not None else '?'}")
-    else:
-        rationale.append("Age outside study range")
-
-    # Autism keyword already filtered at indexing stage
-    score += 1
-    rationale.append("Autism relevance")
-
-    # Remote support
-    if study.get("remote", False):
-        score += 1
-        rationale.append("Remote participation supported")
-
-    # Comorbidities match
-    participant_co_conditions = participant_data.get("co_conditions", "").lower()
-    eligibility_text = study.get("eligibility", "").lower()
-    comorbidity_terms = ["adhd", "anxiety", "epilepsy", "seizure", "intellectual disability"]
-
-    if any(term in eligibility_text for term in comorbidity_terms):
-        if any(term in participant_co_conditions for term in comorbidity_terms):
-            score += 1
-            rationale.append("Comorbidity match")
-        else:
-            rationale.append("Comorbidity mentioned but not participant match")
-
-    return score, rationale
-
-def match_studies(participant_data, studies, top_n=10):
+def match_studies(participant_data, all_studies, top_n=10):
     matches = []
 
-    for study in studies:
-        if study.get("status", "").lower() != "recruiting":
+    user_age = participant_data.get("age")
+    user_location = participant_data.get("location", "")
+    co_conditions = participant_data.get("co_conditions", "").lower()
+    preferred_visit = participant_data.get("visit_type", "").lower()
+
+    for study in all_studies:
+        # Skip completed studies
+        if study.get("status", "").lower() == "completed":
             continue
 
-        score, rationale = score_match(study, participant_data)
+        match_score = 0
+        rationale = []
 
-        if score > 0:
-            matches.append({
-                "title": study.get("title", "No Title"),
-                "location": study.get("location", "Unknown"),
-                "link": study.get("link", ""),
-                "summary": study.get("summary", "No summary."),
-                "eligibility": study.get("eligibility", "Not provided"),
-                "contact": study.get("contact", "Not available"),
-                "match_score": f"{score}/10",
-                "match_rationale": "; ".join(rationale)
-            })
+        # 1. Condition Relevance
+        if is_autism_related(study):
+            match_score += 2
+            rationale.append("Autism relevance")
 
-    matches.sort(key=lambda x: int(x["match_score"].split("/")[0]), reverse=True)
-    return matches[:top_n]
+        # 2. Age Match
+        min_age, max_age = extract_age_range(study)
+        if min_age is not None and max_age is not None and user_age is not None:
+            if min_age <= user_age <= max_age:
+                match_score += 2
+                rationale.append(f"Age range {min_age}-{max_age}")
+            else:
+                continue  # Age mismatch → skip
+        else:
+            rationale.append("No age criteria provided")
+
+        # 3. Location Match
+        locations = extract_locations(study)
+        proximity = 0
+        if locations:
+            for loc in locations:
+                score = is_within_distance(user_location, loc)
+                proximity = max(proximity, score)
+            if proximity > 0:
+                match_score += proximity
+                rationale.append(f"Proximity score {proximity}")
+            else:
+                rationale.append("National match")
+        else:
+            rationale.append("No location info")
+
+        # 4. Comorbid Conditions Match
+        if co_conditions and co_conditions != "no":
+            crit_text = extract_participation_criteria(study)
+            if extract_comorbid_keywords(co_conditions, crit_text):
+                match_score += 1
+                rationale.append("Comorbid condition match")
+
+        # 5. Remote Study Support
+        if preferred_visit in ["remote", "both"] and supports_remote_participation(study):
+            match_score += 1
+            rationale.append("Supports remote participation")
+
+        matches.append({
+            "study": study,
+            "score": match_score,
+            "rationale": "; ".join(rationale)
+        })
+
+    # Sort by score descending and return top_n
+    sorted_matches = sorted(matches, key=lambda x: x["score"], reverse=True)
+    return sorted_matches[:top_n]
