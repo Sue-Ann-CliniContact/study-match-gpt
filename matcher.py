@@ -81,10 +81,17 @@ def match_studies(participant, studies):
 
         min_a = s.get("min_age_years")
         max_a = s.get("max_age_years")
+
         if min_a is None or max_a is None:
             min_a_fallback, max_a_fallback = extract_age_from_text(s.get("eligibility_text", ""))
-            min_a = min_a if min_a is not None else min_a_fallback or 0
-            max_a = max_a if max_a is not None else max_a_fallback or 120
+            if min_a is None:
+                min_a = min_a_fallback
+            if max_a is None:
+                max_a = max_a_fallback
+
+        # FINAL safety check
+        if min_a is None or max_a is None:
+            continue
 
         if not (min_a <= user_age <= max_a):
             continue
@@ -122,3 +129,4 @@ def match_studies(participant, studies):
 
     results.sort(key=lambda x: x["match_confidence"], reverse=True)
     return results[:10]
+
