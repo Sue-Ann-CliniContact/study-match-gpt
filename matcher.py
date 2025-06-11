@@ -15,9 +15,10 @@ def extract_age_from_text(text):
 def is_autism_related(text: str) -> bool:
     keywords = ["autism", "asd", "autistic", "spectrum disorder"]
     tl = text.lower()
-    return any(k in tl for k in keywords)
+    hits = sum(1 for k in keywords if k in tl)
+    return hits >= 2  # Require at least 2 keyword matches for higher relevance
 
-def compute_score_and_group(study, user_loc):
+def compute_score_and_group(study, user_loc, user_age):
     score = 0
     group = "Other"
     full_text = " ".join([
@@ -26,21 +27,43 @@ def compute_score_and_group(study, user_loc):
         study.get("eligibility_text", "")
     ])
 
+    # Autism Relevance
     if is_autism_related(full_text):
         score += 5
+    else:
+        score -= 1  # Penalize weak autism match
 
+    # Proximity scoring (distance in miles)
     coords = study.get("coordinates")
     if user_loc and coords:
         lat2, lon2 = coords if isinstance(coords, (list, tuple)) else (coords["lat"], coords["lon"])
         dist = geodesic(user_loc, (lat2, lon2)).miles
-        if dist <= 50:
-            score += 3
+        if dist <= 30:
+            score += 5
             group = "Near You"
+        elif dist <= 100:
+            score += 4
+            group = "Driving Distance"
         elif dist <= 300:
+            score += 3
+            group = "Regional"
+        elif dist <= 1000:
             score += 2
             group = "National"
+        else:
+            score += 1
+            group = "Far/National"
     else:
-        score += 1
+        score += 1  # fallback when location missing
+
+    # Pediatric bonus
+    min_age = study.get("min_age_years", 0)
+    max_age = study.get("max_age_years", 120)
+    if user_age is not None and user_age <= 17:
+        if max_age <= 18:
+            score += 2  # clearly pediatric study
+        elif min_age <= 5 and max_age <= 25:
+            score += 1  # young participant friendly
 
     return score, group
 
@@ -66,7 +89,7 @@ def match_studies(participant, studies):
         if not (min_a <= user_age <= max_a):
             continue
 
-        score, group = compute_score_and_group(s, user_loc)
+        score, group = compute_score_and_group(s, user_loc, user_age)
         if score <= 0:
             continue
 
