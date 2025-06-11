@@ -1,4 +1,3 @@
-
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
@@ -74,7 +73,8 @@ def calculate_age(dob_str):
         dob = datetime.strptime(dob_str, "%B %d, %Y")
         today = datetime.today()
         return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-    except:
+    except Exception as e:
+        print("⚠️ Error parsing date of birth:", dob_str, "→", str(e))
         return None
 
 @app.post("/chat")
@@ -101,7 +101,10 @@ async def chat_handler(request: Request):
     if match:
         try:
             participant_data = json.loads(match.group())
+
             participant_data["age"] = calculate_age(participant_data.get("dob", ""))
+            print("📥 Extracted participant data:", json.dumps(participant_data, indent=2))
+
             push_to_monday(participant_data)
 
             with open("indexed_studies.json", "r") as f:
@@ -110,13 +113,13 @@ async def chat_handler(request: Request):
             matches = match_studies(participant_data, all_studies)
             match_summary = format_matches_for_gpt(matches)
 
-            print("MATCHED STUDIES:", matches)
-            print("FEEDING THIS TO GPT FOR FOLLOW-UP:\n", match_summary)
+            print("✅ MATCHED STUDIES:", matches)
+            print("📤 FEEDING THIS TO GPT FOR FOLLOW-UP:\n", match_summary)
 
-            # DIAGNOSTIC: Return formatted output directly
             return {"reply": match_summary}
 
         except Exception as e:
+            print("❌ Exception while processing match:", str(e))
             return {"reply": "We encountered an error processing your info.", "error": str(e)}
 
     return {"reply": gpt_message}
