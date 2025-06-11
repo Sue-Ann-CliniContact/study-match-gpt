@@ -16,7 +16,7 @@ def is_autism_related(text: str) -> bool:
     keywords = ["autism", "asd", "autistic", "spectrum disorder"]
     tl = text.lower()
     hits = sum(1 for k in keywords if k in tl)
-    return hits >= 2  # Require at least 2 keyword matches for stronger match
+    return hits >= 2  # Require stronger match
 
 def compute_score_and_group(study, user_loc, user_age):
     score = 0
@@ -56,7 +56,7 @@ def compute_score_and_group(study, user_loc, user_age):
 
     min_age = study.get("min_age_years", 0)
     max_age = study.get("max_age_years", 120)
-    if user_age is not None and user_age <= 17:
+    if isinstance(user_age, int) and user_age <= 17:
         if max_age <= 18:
             score += 2
         elif min_age <= 5 and max_age <= 25:
@@ -79,17 +79,11 @@ def match_studies(participant, studies):
         min_a = s.get("min_age_years")
         max_a = s.get("max_age_years")
 
+        # fallback age handling with default
         if min_a is None or max_a is None:
             min_a_fallback, max_a_fallback = extract_age_from_text(s.get("eligibility_text", ""))
-
-            if min_a is None and isinstance(min_a_fallback, int):
-                min_a = min_a_fallback
-
-            if max_a is None and isinstance(max_a_fallback, int):
-                max_a = max_a_fallback
-
-        if min_a is None or max_a is None:
-            continue
+            min_a = min_a if isinstance(min_a, int) else min_a_fallback if isinstance(min_a_fallback, int) else 0
+            max_a = max_a if isinstance(max_a, int) else max_a_fallback if isinstance(max_a_fallback, int) else 120
 
         if not (min_a <= user_age <= max_a):
             continue
