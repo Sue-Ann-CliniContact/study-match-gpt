@@ -1,17 +1,35 @@
 import re
 from geopy.distance import geodesic
 
+def extract_age_from_text(text):
+    if not text:
+        return None, None
+    matches = re.findall(r'(\d+)\s*(?:to|-|–|and)?\s*(\d+)?\s*(?:years|yrs)?', text.lower())
+    if matches:
+        try:
+            min_age = int(matches[0][0])
+            max_age = int(matches[0][1]) if matches[0][1] else 120
+            return min_age, max_age
+        except:
+            return None, None
+    return None, None
+
 def is_autism_related(text: str) -> bool:
-    keywords = ["autism", "autistic", "asd", "spectrum disorder"]
+    keywords = ["autism", "asd", "autistic", "spectrum disorder"]
     tl = text.lower()
     return any(k in tl for k in keywords)
 
-def compute_score_and_group(study: dict, user_loc: tuple) -> tuple:
+def compute_score_and_group(study, user_loc):
     score = 0
     group = "Other"
 
-    combined = f"{study.get('condition_summary','')} {study.get('eligibility','')}"
-    if is_autism_related(combined):
+    full_text = " ".join([
+        study.get("study_title", ""),
+        study.get("summary", ""),
+        study.get("eligibility_text", "")
+    ])
+
+    if is_autism_related(full_text):
         score += 5
 
     coords = study.get("coordinates")
@@ -29,29 +47,26 @@ def compute_score_and_group(study: dict, user_loc: tuple) -> tuple:
 
     return score, group
 
-def parse_age_to_years(value) -> int:
-    if not value:
-        return None
-    text = str(value).lower().strip()
-    match = re.search(r"(\d+)\s*(year|month)", text)
-    if match:
-        number = int(match.group(1))
-        unit = match.group(2)
-        return number if unit == "year" else round(number / 12)
-    digits = re.findall(r"\d+", text)
-    return int(digits[0]) if digits else None
-
-def match_studies(participant: dict, studies: list) -> list:
-    user_loc = participant.get("location")
+def match_studies(participant, studies):
     user_age = participant.get("age")
+    user_loc = participant.get("location")
     if user_age is None:
         return []
 
     results = []
 
     for s in studies:
-        min_a = parse_age_to_years(s.get("min_age")) or 0
-        max_a = parse_age_to_years(s.get("max_age")) or 120
+        # Skip if not recruiting
+        if s.get("recruitment_status", "").lower() != "recruiting":
+            continue
+
+        # Handle age from structured or fallback text
+        min_a = s.get("min_age_years")
+        max_a = s.get("max_age_years")
+        if min_a is None or max_a is None:
+            min_a_fallback, max_a_fallback = extract_age_from_text(s.get("eligibility_text", ""))
+            min_a = min_a if min_a is not None else min_a_fallback or 0
+            max_a = max_a if max_a is not None else max_a_fallback or 120
 
         if not (min_a <= user_age <= max_a):
             continue
@@ -61,7 +76,7 @@ def match_studies(participant: dict, studies: list) -> list:
             continue
 
         rationale = []
-        if is_autism_related(f"{s.get('condition_summary','')} {s.get('eligibility','')}"):
+        if is_autism_related(" ".join([s.get("study_title", ""), s.get("eligibility_text", "")])):
             rationale.append("Autism relevance")
         rationale.append(f"Age range {min_a}-{max_a}")
         rationale.append(f"Proximity score {score}")
@@ -73,15 +88,15 @@ def match_studies(participant: dict, studies: list) -> list:
             contact_parts.append(s["contact_email"])
         if s.get("contact_phone"):
             contact_parts.append(s["contact_phone"])
-        contact = " | ".join(contact_parts).strip()
+        contact = " | ".join(contact_parts) if contact_parts else "Not available"
 
         results.append({
-            "study_title": s.get("title") or s.get("brief_title") or "No Title",
-            "location": f"{s.get('location')}, {s.get('state')}",
-            "study_link": s.get("url") or f"https://clinicaltrials.gov/ct2/show/{s.get('nct_id','')}",
-            "summary": s.get("brief_summary") or s.get("description", "No summary"),
-            "eligibility": s.get("eligibility") or "Not provided",
-            "contact": contact or "Not available",
+            "study_title": s.get("study_title") or "No Title",
+            "location": s.get("location") or "Unknown",
+            "study_link": s.get("study_link") or f"https://clinicaltrials.gov/ct2/show/{s.get('nct_id','')}",
+            "summary": s.get("summary") or "No summary.",
+            "eligibility": s.get("eligibility_text") or "Not provided",
+            "contact": contact,
             "match_confidence": score,
             "match_rationale": "; ".join(rationale),
             "group": group
