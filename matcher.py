@@ -29,11 +29,18 @@ def compute_score_and_group(study: dict, user_loc: tuple) -> tuple:
 
     return score, group
 
-def safe_parse_age(value, fallback):
-    try:
-        return int(re.findall(r"\d+", str(value))[0])
-    except:
-        return fallback
+def parse_age_to_years(value) -> int:
+    if not value:
+        return None
+    text = str(value).lower().strip()
+    match = re.search(r"(\d+)\s*(year|month)", text)
+    if match:
+        number = int(match.group(1))
+        unit = match.group(2)
+        return number if unit == "year" else round(number / 12)
+    # Try raw number
+    digits = re.findall(r"\d+", text)
+    return int(digits[0]) if digits else None
 
 def match_studies(participant: dict, studies: list) -> list:
     user_loc = participant.get("location")
@@ -45,8 +52,8 @@ def match_studies(participant: dict, studies: list) -> list:
     results = []
 
     for s in studies:
-        min_a = safe_parse_age(s.get("min_age"), 0)
-        max_a = safe_parse_age(s.get("max_age"), 120)
+        min_a = parse_age_to_years(s.get("min_age")) or 0
+        max_a = parse_age_to_years(s.get("max_age")) or 120
 
         if pediatric_only and max_a > 18:
             continue
