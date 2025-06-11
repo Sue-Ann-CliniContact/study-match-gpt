@@ -82,10 +82,10 @@ def match_studies(participant, studies):
         if min_a is None or max_a is None:
             min_a_fallback, max_a_fallback = extract_age_from_text(s.get("eligibility_text", ""))
 
-            if min_a is None and min_a_fallback is not None:
+            if min_a is None and isinstance(min_a_fallback, int):
                 min_a = min_a_fallback
 
-            if max_a is None and max_a_fallback is not None:
+            if max_a is None and isinstance(max_a_fallback, int):
                 max_a = max_a_fallback
 
         if min_a is None or max_a is None:
