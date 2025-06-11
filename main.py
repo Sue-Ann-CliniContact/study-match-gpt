@@ -1,6 +1,5 @@
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Request
-from pydantic import BaseModel
 import openai
 import os
 import json

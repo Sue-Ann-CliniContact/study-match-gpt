@@ -1,79 +1,101 @@
 import re
-from utils import (
-    is_autism_related,
-    extract_age_range,
-    extract_locations,
-    is_within_distance,
-    extract_participation_criteria,
-    extract_comorbid_keywords,
-    supports_remote_participation
-)
+from geopy.distance import geodesic
 
-def match_studies(participant_data, all_studies, top_n=10):
-    matches = []
+def extract_age_from_text(text):
+    matches = re.findall(r'(\d+)\s*(?:to|-|–|and)?\s*(\d+)?\s*(?:years|yrs)?', text.lower())
+    if matches:
+        try:
+            min_age = int(matches[0][0])
+            max_age = int(matches[0][1]) if matches[0][1] else 120
+            return min_age, max_age
+        except:
+            return None, None
+    return None, None
 
-    user_age = participant_data.get("age")
-    user_location = participant_data.get("location", "")
-    co_conditions = participant_data.get("co_conditions", "").lower()
-    preferred_visit = participant_data.get("visit_type", "").lower()
+def is_autism_related(text: str) -> bool:
+    keywords = ["autism", "asd", "autistic", "spectrum disorder"]
+    tl = text.lower()
+    return any(k in tl for k in keywords)
 
-    for study in all_studies:
-        # Skip completed studies
-        if study.get("status", "").lower() == "completed":
+def compute_score_and_group(study, user_loc):
+    score = 0
+    group = "Other"
+    full_text = " ".join([
+        study.get("study_title", ""),
+        study.get("summary", ""),
+        study.get("eligibility_text", "")
+    ])
+
+    if is_autism_related(full_text):
+        score += 5
+
+    coords = study.get("coordinates")
+    if user_loc and coords:
+        lat2, lon2 = coords if isinstance(coords, (list, tuple)) else (coords["lat"], coords["lon"])
+        dist = geodesic(user_loc, (lat2, lon2)).miles
+        if dist <= 50:
+            score += 3
+            group = "Near You"
+        elif dist <= 300:
+            score += 2
+            group = "National"
+    else:
+        score += 1
+
+    return score, group
+
+def match_studies(participant, studies):
+    user_age = participant.get("age")
+    user_loc = participant.get("location")
+    if user_age is None:
+        return []
+
+    results = []
+
+    for s in studies:
+        if s.get("recruitment_status", "").lower() != "recruiting":
             continue
 
-        match_score = 0
+        min_a = s.get("min_age_years")
+        max_a = s.get("max_age_years")
+        if min_a is None or max_a is None:
+            min_a_fallback, max_a_fallback = extract_age_from_text(s.get("eligibility_text", ""))
+            min_a = min_a if min_a is not None else min_a_fallback or 0
+            max_a = max_a if max_a is not None else max_a_fallback or 120
+
+        if not (min_a <= user_age <= max_a):
+            continue
+
+        score, group = compute_score_and_group(s, user_loc)
+        if score <= 0:
+            continue
+
         rationale = []
-
-        # 1. Condition Relevance
-        if is_autism_related(study):
-            match_score += 2
+        if is_autism_related(" ".join([s.get("study_title", ""), s.get("eligibility_text", "")])):
             rationale.append("Autism relevance")
+        rationale.append(f"Age range {min_a}-{max_a}")
+        rationale.append(f"Proximity score {score}")
 
-        # 2. Age Match
-        min_age, max_age = extract_age_range(study)
-        if min_age is not None and max_age is not None and user_age is not None:
-            if min_age <= user_age <= max_age:
-                match_score += 2
-                rationale.append(f"Age range {min_age}-{max_age}")
-            else:
-                continue  # Age mismatch → skip
-        else:
-            rationale.append("No age criteria provided")
+        contact_parts = []
+        if s.get("contact_name"):
+            contact_parts.append(s["contact_name"])
+        if s.get("contact_email"):
+            contact_parts.append(s["contact_email"])
+        if s.get("contact_phone"):
+            contact_parts.append(s["contact_phone"])
+        contact = " | ".join(contact_parts) if contact_parts else "Not available"
 
-        # 3. Location Match
-        locations = extract_locations(study)
-        proximity = 0
-        if locations:
-            for loc in locations:
-                score = is_within_distance(user_location, loc)
-                proximity = max(proximity, score)
-            if proximity > 0:
-                match_score += proximity
-                rationale.append(f"Proximity score {proximity}")
-            else:
-                rationale.append("National match")
-        else:
-            rationale.append("No location info")
-
-        # 4. Comorbid Conditions Match
-        if co_conditions and co_conditions != "no":
-            crit_text = extract_participation_criteria(study)
-            if extract_comorbid_keywords(co_conditions, crit_text):
-                match_score += 1
-                rationale.append("Comorbid condition match")
-
-        # 5. Remote Study Support
-        if preferred_visit in ["remote", "both"] and supports_remote_participation(study):
-            match_score += 1
-            rationale.append("Supports remote participation")
-
-        matches.append({
-            "study": study,
-            "score": match_score,
-            "rationale": "; ".join(rationale)
+        results.append({
+            "study_title": s.get("study_title") or "No Title",
+            "location": s.get("location") or "Unknown",
+            "study_link": s.get("study_link") or f"https://clinicaltrials.gov/ct2/show/{s.get('nct_id','')}",
+            "summary": s.get("summary") or "No summary.",
+            "eligibility": s.get("eligibility_text") or "Not provided",
+            "contact": contact,
+            "match_confidence": score,
+            "match_rationale": "; ".join(rationale),
+            "group": group
         })
 
-    # Sort by score descending and return top_n
-    sorted_matches = sorted(matches, key=lambda x: x["score"], reverse=True)
-    return sorted_matches[:top_n]
+    results.sort(key=lambda x: x["match_confidence"], reverse=True)
+    return results[:10]
