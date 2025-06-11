@@ -12,6 +12,8 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 def is_age_eligible(age, min_age, max_age):
+    if age is None:
+        return False
     if min_age is not None and age < min_age:
         return False
     if max_age is not None and age > max_age:
@@ -35,11 +37,14 @@ def score_match(study, participant_data):
         else:
             rationale.append("International or unknown location")
 
-    # Age
+    # Age eligibility scoring
     age = participant_data.get("age")
-    if is_age_eligible(age, study.get("min_age"), study.get("max_age")):
+    min_age = study.get("min_age")
+    max_age = study.get("max_age")
+
+    if is_age_eligible(age, min_age, max_age):
         score += 2
-        rationale.append(f"Age range {study.get('min_age', '?')}-{study.get('max_age', '?')}")
+        rationale.append(f"Age range {min_age if min_age is not None else '?'}-{max_age if max_age is not None else '?'}")
     else:
         rationale.append("Age outside study range")
 
@@ -47,20 +52,22 @@ def score_match(study, participant_data):
     score += 1
     rationale.append("Autism relevance")
 
-    # Check if remote participation is supported
+    # Remote support
     if study.get("remote", False):
         score += 1
         rationale.append("Remote participation supported")
 
-    # Comorbidities relevance
+    # Comorbidities match
     participant_co_conditions = participant_data.get("co_conditions", "").lower()
     eligibility_text = study.get("eligibility", "").lower()
-    if any(term in eligibility_text for term in ["adhd", "anxiety", "epilepsy", "seizure", "intellectual disability"]):
-        if any(term in participant_co_conditions for term in ["adhd", "anxiety", "epilepsy", "seizure", "intellectual disability"]):
+    comorbidity_terms = ["adhd", "anxiety", "epilepsy", "seizure", "intellectual disability"]
+
+    if any(term in eligibility_text for term in comorbidity_terms):
+        if any(term in participant_co_conditions for term in comorbidity_terms):
             score += 1
             rationale.append("Comorbidity match")
         else:
-            rationale.append("Comorbidity mentioned but not a participant match")
+            rationale.append("Comorbidity mentioned but not participant match")
 
     return score, rationale
 
@@ -69,10 +76,6 @@ def match_studies(participant_data, studies, top_n=10):
 
     for study in studies:
         if study.get("status", "").lower() != "recruiting":
-            continue
-
-        age = participant_data.get("age")
-        if age is None or not is_age_eligible(age, study.get("min_age"), study.get("max_age")):
             continue
 
         score, rationale = score_match(study, participant_data)
