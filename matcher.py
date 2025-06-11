@@ -38,7 +38,6 @@ def parse_age_to_years(value) -> int:
         number = int(match.group(1))
         unit = match.group(2)
         return number if unit == "year" else round(number / 12)
-    # Try raw number
     digits = re.findall(r"\d+", text)
     return int(digits[0]) if digits else None
 
@@ -48,15 +47,12 @@ def match_studies(participant: dict, studies: list) -> list:
     if user_age is None:
         return []
 
-    pediatric_only = participant.get("study_age_focus", "pediatric").lower().startswith("ped")
     results = []
 
     for s in studies:
         min_a = parse_age_to_years(s.get("min_age")) or 0
         max_a = parse_age_to_years(s.get("max_age")) or 120
 
-        if pediatric_only and max_a > 18:
-            continue
         if not (min_a <= user_age <= max_a):
             continue
 
