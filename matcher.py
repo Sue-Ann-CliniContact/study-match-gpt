@@ -79,21 +79,27 @@ def match_studies(participant, studies):
         if s.get("recruitment_status", "").lower() != "recruiting":
             continue
 
+        # Try direct values
         min_a = s.get("min_age_years")
         max_a = s.get("max_age_years")
 
+        # Try fallback parsing from eligibility text
         if min_a is None or max_a is None:
-            min_a_fallback, max_a_fallback = extract_age_from_text(s.get("eligibility_text", ""))
+            parsed_min, parsed_max = extract_age_from_text(s.get("eligibility_text", ""))
             if min_a is None:
-                min_a = min_a_fallback
+                min_a = parsed_min
             if max_a is None:
-                max_a = max_a_fallback
+                max_a = parsed_max
 
-        # FINAL safety check
+        # HARD FAIL if still None
         if min_a is None or max_a is None:
             continue
 
-        if not (min_a <= user_age <= max_a):
+        try:
+            if not (min_a <= user_age <= max_a):
+                continue
+        except TypeError as e:
+            print("⚠️ TypeError comparing age:", e, "→", f"min_a={min_a}, max_a={max_a}, user_age={user_age}")
             continue
 
         score, group = compute_score_and_group(s, user_loc, user_age)
