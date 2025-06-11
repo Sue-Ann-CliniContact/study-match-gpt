@@ -16,7 +16,7 @@ def is_autism_related(text: str) -> bool:
     keywords = ["autism", "asd", "autistic", "spectrum disorder"]
     tl = text.lower()
     hits = sum(1 for k in keywords if k in tl)
-    return hits >= 2  # Require at least 2 keyword matches for higher relevance
+    return hits >= 2  # Require at least 2 keyword matches for stronger match
 
 def compute_score_and_group(study, user_loc, user_age):
     score = 0
@@ -27,13 +27,11 @@ def compute_score_and_group(study, user_loc, user_age):
         study.get("eligibility_text", "")
     ])
 
-    # Autism Relevance
     if is_autism_related(full_text):
         score += 5
     else:
-        score -= 1  # Penalize weak autism match
+        score -= 1
 
-    # Proximity scoring (distance in miles)
     coords = study.get("coordinates")
     if user_loc and coords:
         lat2, lon2 = coords if isinstance(coords, (list, tuple)) else (coords["lat"], coords["lon"])
@@ -54,16 +52,15 @@ def compute_score_and_group(study, user_loc, user_age):
             score += 1
             group = "Far/National"
     else:
-        score += 1  # fallback when location missing
+        score += 1
 
-    # Pediatric bonus
     min_age = study.get("min_age_years", 0)
     max_age = study.get("max_age_years", 120)
     if user_age is not None and user_age <= 17:
         if max_age <= 18:
-            score += 2  # clearly pediatric study
+            score += 2
         elif min_age <= 5 and max_age <= 25:
-            score += 1  # young participant friendly
+            score += 1
 
     return score, group
 
@@ -71,7 +68,6 @@ def match_studies(participant, studies):
     user_age = participant.get("age")
     user_loc = participant.get("location")
     if user_age is None:
-        print("⚠️ User age missing — aborting match.")
         return []
 
     results = []
@@ -84,15 +80,11 @@ def match_studies(participant, studies):
         max_a = s.get("max_age_years")
 
         if min_a is None or max_a is None:
-            parsed_min, parsed_max = extract_age_from_text(s.get("eligibility_text", ""))
-            if min_a is None:
-                min_a = parsed_min
-            if max_a is None:
-                max_a = parsed_max
+            min_a_fallback, max_a_fallback = extract_age_from_text(s.get("eligibility_text", ""))
+            min_a = min_a if min_a is not None else min_a_fallback
+            max_a = max_a if max_a is not None else max_a_fallback
 
-        # Final check to ensure numeric bounds
-        if not isinstance(min_a, int) or not isinstance(max_a, int):
-            print(f"⚠️ Skipping study due to invalid age bounds: min={min_a}, max={max_a}")
+        if min_a is None or max_a is None:
             continue
 
         if not (min_a <= user_age <= max_a):
