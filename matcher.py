@@ -1,99 +1,93 @@
-import re
-from geopy.distance import geodesic
+import math
 
-def is_autism_related(text: str) -> bool:
-    keywords = ["autism", "autistic", "asd", "spectrum disorder"]
-    tl = text.lower()
-    return any(k in tl for k in keywords)
+def haversine_distance(lat1, lon1, lat2, lon2):
+    R = 3958.8  # Radius of Earth in miles
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
 
-def compute_score_and_group(study: dict, user_loc: tuple) -> tuple:
+    a = math.sin(d_phi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(d_lambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    return R * c
+
+def is_age_eligible(age, min_age, max_age):
+    if min_age is not None and age < min_age:
+        return False
+    if max_age is not None and age > max_age:
+        return False
+    return True
+
+def score_match(study, participant_data):
     score = 0
-    group = "Other"
+    rationale = []
 
-    combined = f"{study.get('condition_summary','')} {study.get('eligibility','')}"
-    if is_autism_related(combined):
-        score += 5
-# Boost score if participant's comorbid conditions match those listed in eligibility
-    participant_conditions = participant_data.get("co_conditions", "").lower()
-    eligibility_text = study.get("eligibility", "").lower()
-    if any(cond in eligibility_text for cond in participant_conditions.split(",") if cond.strip()):
-        score += 1
-# Boost score if study mentions remote/online participation
-    if "remote" in eligibility_text or "online" in eligibility_text:
-        score += 1
-
-    coords = study.get("coordinates")
-    if user_loc and coords:
-        lat2, lon2 = coords if isinstance(coords, (list, tuple)) else (coords["lat"], coords["lon"])
-        dist = geodesic(user_loc, (lat2, lon2)).miles
-        if dist <= 50:
+    # Location proximity
+    participant_city = participant_data.get("location", "").lower()
+    study_location = study.get("location", "").lower()
+    if participant_city and study_location:
+        if participant_city.split(",")[0] in study_location:
             score += 3
-            group = "Near You"
-        elif dist <= 300:
+            rationale.append("Same city match")
+        elif "united states" in study_location or "usa" in study_location or "us" in study_location:
             score += 2
-            group = "National"
+            rationale.append("National match")
+        else:
+            rationale.append("International or unknown location")
+
+    # Age
+    age = participant_data.get("age")
+    if is_age_eligible(age, study.get("min_age"), study.get("max_age")):
+        score += 2
+        rationale.append(f"Age range {study.get('min_age', '?')}-{study.get('max_age', '?')}")
     else:
+        rationale.append("Age outside study range")
+
+    # Autism keyword already filtered at indexing stage
+    score += 1
+    rationale.append("Autism relevance")
+
+    # Check if remote participation is supported
+    if study.get("remote", False):
         score += 1
+        rationale.append("Remote participation supported")
 
-    return score, group
+    # Comorbidities relevance
+    participant_co_conditions = participant_data.get("co_conditions", "").lower()
+    eligibility_text = study.get("eligibility", "").lower()
+    if any(term in eligibility_text for term in ["adhd", "anxiety", "epilepsy", "seizure", "intellectual disability"]):
+        if any(term in participant_co_conditions for term in ["adhd", "anxiety", "epilepsy", "seizure", "intellectual disability"]):
+            score += 1
+            rationale.append("Comorbidity match")
+        else:
+            rationale.append("Comorbidity mentioned but not a participant match")
 
-def parse_age_to_years(value) -> int:
-    if not value:
-        return None
-    text = str(value).lower().strip()
-    match = re.search(r"(\d+)\s*(year|month)", text)
-    if match:
-        number = int(match.group(1))
-        unit = match.group(2)
-        return number if unit == "year" else round(number / 12)
-    digits = re.findall(r"\d+", text)
-    return int(digits[0]) if digits else None
+    return score, rationale
 
-def match_studies(participant: dict, studies: list) -> list:
-    user_loc = participant.get("location")
-    user_age = participant.get("age")
-    if user_age is None:
-        return []
+def match_studies(participant_data, studies, top_n=10):
+    matches = []
 
-    results = []
-
-    for s in studies:
-        min_a = parse_age_to_years(s.get("min_age")) or 0
-        max_a = parse_age_to_years(s.get("max_age")) or 120
-
-        if not (min_a <= user_age <= max_a):
+    for study in studies:
+        if study.get("status", "").lower() != "recruiting":
             continue
 
-        score, group = compute_score_and_group(s, user_loc)
-        if score <= 0:
+        age = participant_data.get("age")
+        if age is None or not is_age_eligible(age, study.get("min_age"), study.get("max_age")):
             continue
 
-        rationale = []
-        if is_autism_related(f"{s.get('condition_summary','')} {s.get('eligibility','')}"):
-            rationale.append("Autism relevance")
-        rationale.append(f"Age range {min_a}-{max_a}")
-        rationale.append(f"Proximity score {score}")
+        score, rationale = score_match(study, participant_data)
 
-        contact_parts = []
-        if s.get("contact_name"):
-            contact_parts.append(s["contact_name"])
-        if s.get("contact_email"):
-            contact_parts.append(s["contact_email"])
-        if s.get("contact_phone"):
-            contact_parts.append(s["contact_phone"])
-        contact = " | ".join(contact_parts).strip()
+        if score > 0:
+            matches.append({
+                "title": study.get("title", "No Title"),
+                "location": study.get("location", "Unknown"),
+                "link": study.get("link", ""),
+                "summary": study.get("summary", "No summary."),
+                "eligibility": study.get("eligibility", "Not provided"),
+                "contact": study.get("contact", "Not available"),
+                "match_score": f"{score}/10",
+                "match_rationale": "; ".join(rationale)
+            })
 
-        results.append({
-            "study_title": s.get("title") or s.get("brief_title") or "No Title",
-            "location": f"{s.get('location')}, {s.get('state')}",
-            "study_link": s.get("url") or f"https://clinicaltrials.gov/ct2/show/{s.get('nct_id','')}",
-            "summary": s.get("brief_summary") or s.get("description", "No summary"),
-            "eligibility": s.get("eligibility") or "Not provided",
-            "contact": contact or "Not available",
-            "match_confidence": score,
-            "match_rationale": "; ".join(rationale),
-            "group": group
-        })
-
-    results.sort(key=lambda x: x["match_confidence"], reverse=True)
-    return results[:10]
+    matches.sort(key=lambda x: int(x["match_score"].split("/")[0]), reverse=True)
+    return matches[:top_n]
