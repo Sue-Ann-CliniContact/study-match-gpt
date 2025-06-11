@@ -15,9 +15,10 @@ def extract_age_from_text(text):
 def is_autism_related(text: str) -> bool:
     keywords = ["autism", "asd", "autistic", "spectrum disorder"]
     tl = text.lower()
-    return any(k in tl for k in keywords)
+    hits = sum(1 for k in keywords if k in tl)
+    return hits >= 2  # Require at least 2 keyword matches for stronger match
 
-def compute_score_and_group(study, user_loc):
+def compute_score_and_group(study, user_loc, user_age):
     score = 0
     group = "Other"
     full_text = " ".join([
@@ -26,21 +27,43 @@ def compute_score_and_group(study, user_loc):
         study.get("eligibility_text", "")
     ])
 
+    # Autism relevance scoring
     if is_autism_related(full_text):
         score += 5
+    else:
+        score -= 1
 
+    # Proximity scoring
     coords = study.get("coordinates")
     if user_loc and coords:
         lat2, lon2 = coords if isinstance(coords, (list, tuple)) else (coords["lat"], coords["lon"])
         dist = geodesic(user_loc, (lat2, lon2)).miles
-        if dist <= 50:
-            score += 3
+        if dist <= 30:
+            score += 5
             group = "Near You"
+        elif dist <= 100:
+            score += 4
+            group = "Driving Distance"
         elif dist <= 300:
+            score += 3
+            group = "Regional"
+        elif dist <= 1000:
             score += 2
             group = "National"
+        else:
+            score += 1
+            group = "Far/National"
     else:
-        score += 1
+        score += 1  # Can't calculate, assume general national
+
+    # Pediatric scoring
+    min_age = study.get("min_age_years", 0)
+    max_age = study.get("max_age_years", 120)
+    if user_age is not None and user_age <= 17:
+        if max_age <= 18:
+            score += 2
+        elif min_age <= 5 and max_age <= 25:
+            score += 1
 
     return score, group
 
@@ -58,24 +81,40 @@ def match_studies(participant, studies):
 
         min_a = s.get("min_age_years")
         max_a = s.get("max_age_years")
+
+        # Fallback from eligibility text
         if min_a is None or max_a is None:
             min_a_fallback, max_a_fallback = extract_age_from_text(s.get("eligibility_text", ""))
-            min_a = min_a if min_a is not None else min_a_fallback or 0
-            max_a = max_a if max_a is not None else max_a_fallback or 120
 
+            # Use fallback if valid
+            if min_a is None and isinstance(min_a_fallback, int):
+                min_a = min_a_fallback
+            if max_a is None and isinstance(max_a_fallback, int):
+                max_a = max_a_fallback
+
+        # Final defensive fallback
+        if not isinstance(min_a, int):
+            min_a = 0
+        if not isinstance(max_a, int):
+            max_a = 120
+
+        # Age check
         if not (min_a <= user_age <= max_a):
             continue
 
-        score, group = compute_score_and_group(s, user_loc)
+        # Compute score
+        score, group = compute_score_and_group(s, user_loc, user_age)
         if score <= 0:
             continue
 
+        # Build rationale
         rationale = []
         if is_autism_related(" ".join([s.get("study_title", ""), s.get("eligibility_text", "")])):
             rationale.append("Autism relevance")
         rationale.append(f"Age range {min_a}-{max_a}")
         rationale.append(f"Proximity score {score}")
 
+        # Contact formatting
         contact_parts = []
         if s.get("contact_name"):
             contact_parts.append(s["contact_name"])
