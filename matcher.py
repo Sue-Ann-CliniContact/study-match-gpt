@@ -25,7 +25,7 @@ def compute_score_and_group(study: dict, user_loc: tuple) -> tuple:
             score += 2
             group = "National"
     else:
-        score += 1  # Reward for having some info even if coords missing
+        score += 1
 
     return score, group
 
@@ -42,8 +42,8 @@ def match_studies(participant: dict, studies: list) -> list:
         return []
 
     pediatric_only = participant.get("study_age_focus", "pediatric").lower().startswith("ped")
-
     results = []
+
     for s in studies:
         min_a = safe_parse_age(s.get("min_age"), 0)
         max_a = safe_parse_age(s.get("max_age"), 120)
@@ -63,19 +63,26 @@ def match_studies(participant: dict, studies: list) -> list:
         rationale.append(f"Age range {min_a}-{max_a}")
         rationale.append(f"Proximity score {score}")
 
+        contact_parts = []
+        if s.get("contact_name"):
+            contact_parts.append(s["contact_name"])
+        if s.get("contact_email"):
+            contact_parts.append(s["contact_email"])
+        if s.get("contact_phone"):
+            contact_parts.append(s["contact_phone"])
+        contact = " | ".join(contact_parts).strip()
+
         results.append({
-            "title": s.get("title") or s.get("brief_title") or "No Title",
+            "study_title": s.get("title") or s.get("brief_title") or "No Title",
             "location": f"{s.get('location')}, {s.get('state')}",
-            "url": s.get("url") or f"https://clinicaltrials.gov/ct2/show/{s.get('nct_id','')}",
+            "study_link": s.get("url") or f"https://clinicaltrials.gov/ct2/show/{s.get('nct_id','')}",
             "summary": s.get("brief_summary") or s.get("description", "No summary"),
             "eligibility": s.get("eligibility") or "Not provided",
-            "contact_name": s.get("contact_name", "Not available"),
-            "contact_email": s.get("contact_email", "Not available"),
-            "contact_phone": s.get("contact_phone", "Not available"),
-            "match_score": score,
-            "match_reason": rationale,
+            "contact": contact or "Not available",
+            "match_confidence": score,
+            "match_rationale": "; ".join(rationale),
             "group": group
         })
 
-    results.sort(key=lambda x: x["match_score"], reverse=True)
+    results.sort(key=lambda x: x["match_confidence"], reverse=True)
     return results[:10]
